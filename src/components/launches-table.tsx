@@ -273,24 +273,6 @@ export function LaunchesTable({
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Status row */}
-      <div className="flex items-center justify-end border-b border-zinc-800 pb-1">
-        <div className="text-xs text-zinc-500 flex items-center gap-3 tabular-nums">
-          <button
-            onClick={toggleSound}
-            title={soundOn ? "Sound on — click to mute" : "Sound off — click to enable"}
-            className={`transition-colors ${soundOn ? "text-zinc-200" : "text-zinc-600 hover:text-zinc-400"}`}
-          >
-            {soundOn ? "🔔" : "🔕"}
-          </button>
-          <span
-            className={`inline-block h-1.5 w-1.5 rounded-full transition-colors ${refreshing ? "bg-violet-400" : "bg-emerald-500/70"}`}
-            title={refreshing ? "refreshing…" : "live"}
-          />
-          <span suppressHydrationWarning>{fmtAge(lastUpdated)}</span>
-        </div>
-      </div>
-
           {/* Filter bar */}
           <div className="flex items-center gap-2 flex-wrap">
             <input
@@ -310,7 +292,7 @@ export function LaunchesTable({
             </FilterBtn>
           </div>
 
-          {/* Age + deployer filters */}
+          {/* Age + deployer filters + sound toggle + live indicator */}
           <div className="flex items-center gap-2 flex-wrap text-xs">
             <span className="text-zinc-500">Age:</span>
             {(["all", "1h", "4h", "24h"] as AgeFilter[]).map((a) => (
@@ -326,6 +308,20 @@ export function LaunchesTable({
                 {label}
               </button>
             ))}
+            <div className="ml-auto flex items-center gap-3 text-zinc-500 tabular-nums">
+              <button
+                onClick={toggleSound}
+                title={soundOn ? "Sound on — click to mute" : "Sound off — click to enable"}
+                className={`transition-colors ${soundOn ? "text-zinc-200" : "text-zinc-600 hover:text-zinc-400"}`}
+              >
+                {soundOn ? "🔔" : "🔕"}
+              </button>
+              <span
+                className={`inline-block h-1.5 w-1.5 rounded-full transition-colors ${refreshing ? "bg-violet-400" : "bg-emerald-500/70"}`}
+                title={refreshing ? "refreshing…" : "live"}
+              />
+              <span suppressHydrationWarning>{fmtAge(lastUpdated)}</span>
+            </div>
           </div>
 
           {/* Main table */}
