@@ -1,16 +1,5 @@
-import {
-  backfillDeployerHistory,
-  fetchBankrLaunch,
-  fetchBankrLaunches,
-  getRecentLaunchAddresses,
-  pruneOldLaunches,
-  writeLaunchesToRedis,
-} from "./bankr";
-import {
-  fetchDexPairs,
-  fetchDexPairsForToken,
-  fetchPaidBaseSignals,
-} from "./dexscreener";
+import { fetchBankrLaunch, fetchBankrLaunches } from "./bankr";
+import { fetchDexPairsForToken, fetchPaidBaseSignals } from "./dexscreener";
 import { K, redis } from "./redis";
 import type { BankrLaunch } from "./types";
 
@@ -24,7 +13,6 @@ export type PaidEntry = {
   bankr?: BankrLaunch | null;
 };
 
-const MAX_DRAIN_PER_TICK = 200;
 const PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 
 export function isPaidProfile(p: {
@@ -41,171 +29,130 @@ export function isPaidProfile(p: {
   return false;
 }
 
+function bestPairFor(
+  addr: string,
+  pairs: Awaited<ReturnType<typeof fetchDexPairsForToken>>,
+) {
+  return pairs
+    .filter((p) => p.baseToken?.address?.toLowerCase() === addr)
+    .sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0))[0];
+}
+
 /**
- * Core poll logic — called by the /api/cron/poll-paid route once per minute.
+ * Core poll — called by /api/cron/poll-paid once per minute.
  *
- * Three steps:
- *  1. Pull DexScreener global boost/profile feeds to catch brand-new payments.
- *  2. Re-check each currently-known paid address for expiry / upgrades.
- *  3. Drain addresses we haven't checked yet (backfill from launchIndex).
+ * Step 1: DexScreener global boost/profile feeds → catch brand-new payments.
+ * Step 2: Check every token in the current Bankr top-50 individually.
+ * Step 3: Re-check all currently known paid tokens for expiry / upgrades.
+ *
+ * No ZSET, no drain queue, no per-deployer backfill. We only care whether a
+ * token has an active boost or a paid profile — both are visible per-token
+ * via fetchDexPairsForToken (single-address, no 30-pair cap).
  */
 export async function pollOnce(): Promise<void> {
   const now = Date.now();
 
-  // Fetch latest launches and write to the ZSET index. Page renders no longer
-  // write to Redis (read-only), so the cron is the sole writer of this index.
-  const latestLaunches = await fetchBankrLaunches().catch(() => []);
-  await writeLaunchesToRedis(latestLaunches).catch(() => {});
-
-  // (1) Global feeds — discovers new paid addresses before they enter our set.
+  // Step 1: Global feeds — discover newly paid Base tokens.
   const signals = await fetchPaidBaseSignals().catch(() => []);
   for (const sig of signals) {
     const addr = sig.address.toLowerCase();
-    const prev = await redis.hget<PaidEntry>(K.paid, addr);
+    const prev = await redis.hget<PaidEntry>(K.paid, addr).catch(() => null);
     let bankr = prev?.bankr;
     if (bankr === undefined) {
       bankr = await fetchBankrLaunch(addr).catch(() => null);
     }
     if (!bankr) continue;
-    await redis.hset(K.paid, {
-      [addr]: {
-        address: addr,
-        boostAmount: Math.max(sig.boostAmount, prev?.boostAmount ?? 0),
-        totalBoostAmount: Math.max(
-          sig.boostAmount,
-          prev?.totalBoostAmount ?? 0,
-        ),
-        hasProfile: sig.hasProfile || prev?.hasProfile === true,
-        firstPaidAt: prev?.firstPaidAt ?? now,
-        lastSeenAt: now,
-        bankr,
-      } satisfies PaidEntry,
-    });
-  }
-
-  // (2) Re-check currently known paid addresses individually.
-  // fetchDexPairsForToken avoids the 30-pair cap of batched calls.
-  const allPaid = (await redis.hgetall<Record<string, PaidEntry>>(K.paid)) ?? {};
-  const knownPaidAddrs = Object.entries(allPaid)
-    .filter(([, e]) => (e.boostAmount ?? 0) > 0 || e.hasProfile)
-    .map(([addr]) => addr);
-
-  for (const addr of knownPaidAddrs) {
-    const pairs = await fetchDexPairsForToken(addr).catch(() => []);
-    const best = pairs
-      .filter((p) => p.baseToken?.address?.toLowerCase() === addr)
-      .sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0))[0];
-    if (!best) continue;
-    const prev = allPaid[addr];
-    if (!prev?.bankr) continue;
-    await redis.hset(K.paid, {
-      [addr]: {
-        ...prev,
-        boostAmount: best.boosts?.active ?? 0,
-        totalBoostAmount: Math.max(
-          prev.totalBoostAmount,
-          best.boosts?.active ?? 0,
-        ),
-        hasProfile: isPaidProfile(best),
-        lastSeenAt: now,
-      } satisfies PaidEntry,
-    });
-  }
-
-  // (3) Drain unchecked addresses from the 14-day launch index.
-  const [allKnown, checkedMembers] = await Promise.all([
-    getRecentLaunchAddresses(),
-    redis.smembers(K.paidChecked),
-  ]);
-  const checked = new Set(checkedMembers as string[]);
-  const unchecked = allKnown.filter((a) => !checked.has(a));
-
-  if (unchecked.length > 0) {
-    const batch = unchecked.slice(0, MAX_DRAIN_PER_TICK);
-    const pairs = await fetchDexPairs(batch).catch(() => []);
-    type Sig = { boost: number; profile: boolean };
-    const sigByToken = new Map<string, Sig>();
-    for (const p of pairs) {
-      const baseAddr = p.baseToken?.address?.toLowerCase();
-      if (!baseAddr) continue;
-      const active = p.boosts?.active ?? 0;
-      const hasProfile = isPaidProfile(p);
-      if (!active && !hasProfile) continue;
-      const prev = sigByToken.get(baseAddr) ?? { boost: 0, profile: false };
-      sigByToken.set(baseAddr, {
-        boost: Math.max(prev.boost, active),
-        profile: prev.profile || hasProfile,
-      });
-    }
-    for (const [addr, sig] of sigByToken) {
-      const prev = await redis.hget<PaidEntry>(K.paid, addr);
-      let bankr = prev?.bankr;
-      if (bankr === undefined) {
-        bankr = await fetchBankrLaunch(addr).catch(() => null);
-      }
-      if (!bankr) continue;
-      await redis.hset(K.paid, {
+    await redis
+      .hset(K.paid, {
         [addr]: {
           address: addr,
-          boostAmount: sig.boost,
-          totalBoostAmount: Math.max(prev?.totalBoostAmount ?? 0, sig.boost),
-          hasProfile: sig.profile || prev?.hasProfile === true,
+          boostAmount: Math.max(sig.boostAmount, prev?.boostAmount ?? 0),
+          totalBoostAmount: Math.max(
+            sig.boostAmount,
+            prev?.totalBoostAmount ?? 0,
+          ),
+          hasProfile: sig.hasProfile || prev?.hasProfile === true,
           firstPaidAt: prev?.firstPaidAt ?? now,
           lastSeenAt: now,
           bankr,
         } satisfies PaidEntry,
-      });
-    }
-    if (batch.length > 0) {
-      await redis.sadd(K.paidChecked, ...(batch as [string, ...string[]]));
-    }
+      })
+      .catch(() => {});
   }
 
-  // Prune paid entries not seen in 7 days or missing a bankr reference.
-  const freshPaid =
-    (await redis.hgetall<Record<string, PaidEntry>>(K.paid)) ?? {};
+  // Step 2: Check every token in the current Bankr top-50 individually.
+  // fetchDexPairsForToken avoids the 30-pair cap that batched calls suffer from.
+  const launches = await fetchBankrLaunches().catch(() => []);
+  for (const launch of launches) {
+    const addr = launch.tokenAddress.toLowerCase();
+    const pairs = await fetchDexPairsForToken(addr).catch(() => []);
+    const best = bestPairFor(addr, pairs);
+    if (!best) continue;
+    const active = best.boosts?.active ?? 0;
+    const hasProfile = isPaidProfile(best);
+    if (!active && !hasProfile) continue;
+    const prev = await redis.hget<PaidEntry>(K.paid, addr).catch(() => null);
+    await redis
+      .hset(K.paid, {
+        [addr]: {
+          address: addr,
+          boostAmount: active,
+          totalBoostAmount: Math.max(prev?.totalBoostAmount ?? 0, active),
+          hasProfile,
+          firstPaidAt: prev?.firstPaidAt ?? now,
+          lastSeenAt: now,
+          bankr: launch,
+        } satisfies PaidEntry,
+      })
+      .catch(() => {});
+  }
+
+  // Step 3: Re-check all currently known paid tokens.
+  const allPaid =
+    (await redis.hgetall<Record<string, PaidEntry>>(K.paid).catch(() => null)) ??
+    {};
   const toDelete: string[] = [];
-  for (const [addr, entry] of Object.entries(freshPaid)) {
+  for (const [addr, entry] of Object.entries(allPaid)) {
     if (!entry.bankr || now - entry.lastSeenAt > PRUNE_AFTER_MS) {
       toDelete.push(addr);
+      continue;
     }
+    const pairs = await fetchDexPairsForToken(addr).catch(() => []);
+    const best = bestPairFor(addr, pairs);
+    if (!best) continue;
+    await redis
+      .hset(K.paid, {
+        [addr]: {
+          ...entry,
+          boostAmount: best.boosts?.active ?? 0,
+          totalBoostAmount: Math.max(
+            entry.totalBoostAmount,
+            best.boosts?.active ?? 0,
+          ),
+          hasProfile: isPaidProfile(best),
+          lastSeenAt: now,
+        } satisfies PaidEntry,
+      })
+      .catch(() => {});
   }
   if (toDelete.length > 0) {
-    await redis.hdel(K.paid, ...(toDelete as [string, ...string[]]));
+    await redis
+      .hdel(K.paid, ...(toDelete as [string, ...string[]]))
+      .catch(() => {});
   }
-
-  await pruneOldLaunches();
 }
 
-/** Returns all currently tracked paid Bankr launches. Called on every render. */
+/** All currently tracked paid Bankr launches. Called on every page render. */
 export async function getPaidBankrEntries(): Promise<
   Array<PaidEntry & { bankr: BankrLaunch }>
 > {
   const all =
-    (await redis.hgetall<Record<string, PaidEntry>>(K.paid).catch(() => null)) ?? {};
+    (await redis
+      .hgetall<Record<string, PaidEntry>>(K.paid)
+      .catch(() => null)) ?? {};
   const out: Array<PaidEntry & { bankr: BankrLaunch }> = [];
   for (const entry of Object.values(all)) {
     if (entry.bankr) out.push(entry as PaidEntry & { bankr: BankrLaunch });
   }
   return out;
-}
-
-/**
- * One-time backfill: walk every deployer's full history and write launches to
- * the Redis index so the drain step covers their complete 14-day window —
- * not just the most recent 50. Safe to call from a slow cron or admin route.
- */
-export async function backfillKnownDeployers(): Promise<void> {
-  const launches = await fetchBankrLaunches().catch(() => []);
-  const deployers = new Set(
-    launches.map((l) => l.deployer.walletAddress.toLowerCase()),
-  );
-  let total = 0;
-  for (const addr of deployers) {
-    const n = await backfillDeployerHistory(addr).catch(() => 0);
-    total += n;
-  }
-  console.log(
-    `[paid-watcher] backfill: ${deployers.size} deployers, ${total} launches`,
-  );
 }
