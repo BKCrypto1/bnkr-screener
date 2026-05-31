@@ -215,7 +215,7 @@ export default async function TokenPage({
               : launch.deployer.walletAddress
           }
           mono={!launch.deployer.xUsername}
-          href={launch.tweetUrl}
+          href={launch.deployer.xUsername ? `https://x.com/${launch.deployer.xUsername}` : `https://basescan.org/address/${launch.deployer.walletAddress}`}
           extra={
             deployerSummary
               ? `${deployerSummary.count}${deployerSummary.truncated ? "+" : ""} lifetime launches`
