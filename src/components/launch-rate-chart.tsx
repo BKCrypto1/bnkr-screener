@@ -35,8 +35,8 @@ export function LaunchRateChart({ buckets }: { buckets: RateBucket[] }) {
     <div className="relative w-full select-none" style={{ height: TOTAL_H }}>
       <svg
         width="100%"
-        height={TOTAL_H}
-        viewBox={`0 0 ${buckets.length} ${TOTAL_H}`}
+        height={CHART_H}
+        viewBox={`0 0 ${buckets.length} ${CHART_H}`}
         preserveAspectRatio="none"
         className="overflow-visible"
       >
@@ -77,24 +77,23 @@ export function LaunchRateChart({ buckets }: { buckets: RateBucket[] }) {
             />
           );
         })}
+      </svg>
 
-        {/* X-axis labels */}
+      {/* X-axis labels as HTML to avoid stretching from preserveAspectRatio="none" */}
+      <div className="relative w-full" style={{ height: LABEL_H }}>
         {buckets.map((b, i) => {
           if (i % labelEvery !== 0) return null;
           return (
-            <text
+            <span
               key={b.ts}
-              x={i + 0.5}
-              y={CHART_H + 14}
-              textAnchor="middle"
-              fontSize="3.5"
-              fill="#71717a"
+              className="absolute text-[10px] text-zinc-500 -translate-x-1/2"
+              style={{ left: `${((i + 0.5) / buckets.length) * 100}%`, top: 4 }}
             >
               {fmtBucketTime(b.ts)}
-            </text>
+            </span>
           );
         })}
-      </svg>
+      </div>
 
       {/* Tooltip */}
       {tooltip && (
