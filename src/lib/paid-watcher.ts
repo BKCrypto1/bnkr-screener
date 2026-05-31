@@ -76,6 +76,9 @@ async function pollOnce() {
       if (bankr === undefined) {
         bankr = await fetchBankrLaunch(addr).catch(() => null);
       }
+      // Skip non-Bankr tokens — the global feeds catch everything on Base
+      // and we only want Bankr launches in our paid set.
+      if (!bankr) continue;
       state.set(addr, {
         address: addr,
         boostAmount: Math.max(sig.boostAmount, prev?.boostAmount ?? 0),
@@ -105,14 +108,16 @@ async function pollOnce() {
         .sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0))[0];
       if (!best) continue; // can't tell if status changed — leave entry alone
       const active = best.boosts?.active ?? 0;
-      const hasProfile = !!best.info?.header;
+      const hasProfile = isPaidProfile(best);
       const prev = state.get(addr);
       if (!prev || !prev.bankr) continue;
+      // Both signals follow live pair data — not sticky. If a team removes
+      // their profile or their boost expires, the badge disappears.
       state.set(addr, {
         ...prev,
         boostAmount: active,
         totalBoostAmount: Math.max(prev.totalBoostAmount, active),
-        hasProfile: hasProfile || prev.hasProfile,
+        hasProfile,
         lastSeenAt: now,
       });
     }
@@ -134,7 +139,7 @@ async function pollOnce() {
         const baseAddr = p.baseToken?.address?.toLowerCase();
         if (!baseAddr) continue;
         const active = p.boosts?.active ?? 0;
-        const hasProfile = !!p.info?.header;
+        const hasProfile = isPaidProfile(p);
         if (!active && !hasProfile) continue;
         const prev = sigByToken.get(baseAddr) ?? { boost: 0, profile: false };
         sigByToken.set(baseAddr, {
@@ -165,10 +170,12 @@ async function pollOnce() {
       for (const a of batch) checked.add(a);
     }
 
-    // Prune watcher entries we haven't observed in 7 days
+    // Prune watcher entries we haven't observed in 7 days, plus any
+    // phantom entries that somehow got in without a bankr reference.
     const PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
     for (const [k, v] of Array.from(state.entries())) {
-      if (now - v.lastSeenAt > PRUNE_AFTER_MS) state.delete(k);
+      if (!v.bankr) state.delete(k);
+      else if (now - v.lastSeenAt > PRUNE_AFTER_MS) state.delete(k);
     }
 
     // Prune launchCache entries that have aged past the 14d retention
@@ -188,6 +195,30 @@ async function pollOnce() {
   } finally {
     globalThis.__bnkrScreenerPaidRunning = false;
   }
+}
+
+/**
+ * Test pair.info for paid Enhanced Token Info signals.
+ *
+ * Teams that pay for Enhanced Token Info can independently choose to
+ * upload a banner (info.header), websites, or socials. Some pay and
+ * upload only websites/socials but skip the banner (e.g. eiplawb).
+ * Free tokens get only auto-populated info.imageUrl and info.openGraph
+ * but NEVER websites or socials — so any of header/websites/socials is
+ * a reliable "paid" signal.
+ */
+function isPaidProfile(p: {
+  info?: {
+    header?: string;
+    websites?: Array<{ url: string }>;
+    socials?: Array<{ url: string }>;
+  };
+}): boolean {
+  if (!p.info) return false;
+  if (p.info.header) return true;
+  if ((p.info.websites?.length ?? 0) > 0) return true;
+  if ((p.info.socials?.length ?? 0) > 0) return true;
+  return false;
 }
 
 /**
