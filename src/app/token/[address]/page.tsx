@@ -6,6 +6,8 @@ import {
   fetchDexPaidStatus,
   pickBestPair,
 } from "@/lib/dexscreener";
+import { redis, K } from "@/lib/redis";
+import type { PaidEntry } from "@/lib/paid-watcher";
 import {
   boostColorClass,
   boostTierFor,
@@ -36,10 +38,11 @@ export default async function TokenPage({
   const launch = await fetchBankrLaunch(address);
   if (!launch) notFound();
 
-  const [pairs, deployerSummary, dexPaid] = await Promise.all([
+  const [pairs, deployerSummary, dexPaid, paidEntry] = await Promise.all([
     fetchDexPairs([launch.tokenAddress]),
     fetchDeployerLaunches(launch.deployer.walletAddress).catch(() => null),
     fetchDexPaidStatus(launch.tokenAddress).catch(() => null),
+    redis.hget<PaidEntry>(K.paid, launch.tokenAddress.toLowerCase()).catch(() => null),
   ]);
   const pair = pickBestPair(launch.tokenAddress, pairs);
   const pool =
@@ -98,6 +101,9 @@ export default async function TokenPage({
             <span className="font-mono">{shortAddr(launch.tokenAddress)}</span>{" "}
             · launched{" "}
             <span suppressHydrationWarning>{fmtAge(launch.timestamp)}</span> ago
+            {paidEntry?.firstPaidAt && (
+              <> · first paid <span suppressHydrationWarning>{fmtAge(paidEntry.firstPaidAt)}</span> ago</>
+            )}
           </p>
           <div className="mt-2 flex flex-wrap gap-3 text-xs text-zinc-400">
             {launch.tweetUrl && (
