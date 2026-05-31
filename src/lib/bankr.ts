@@ -27,7 +27,7 @@ const LAUNCHES_STALE_MS = 60_000;
 
 const LAUNCH_TTL_SEC = 24 * 60 * 60;
 const LAUNCH_NEG_TTL_SEC = 60 * 60;
-const DEPLOYER_TTL_SEC = 6 * 60 * 60;
+const DEPLOYER_TTL_SEC = 60 * 60;
 const MAX_PAGES = 20;
 
 export async function fetchBankrLaunches(): Promise<BankrLaunch[]> {
