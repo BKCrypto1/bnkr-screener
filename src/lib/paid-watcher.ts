@@ -81,20 +81,30 @@ async function pollOnce() {
       tick % SWEEP_EVERY_N_TICKS === 1 ? collectKnownBankrAddresses() : [];
     if (knownBankrAddrs.length > 0) {
       const pairs = await fetchDexPairs(knownBankrAddrs).catch(() => []);
-      // Build a map: tokenAddress → highest pair.boosts.active across all
-      // pairs for that token.
-      const boostByToken = new Map<string, number>();
+      // Per-token signals from the pair endpoint:
+      //   - boosts.active = currently active boost multiplier (authoritative)
+      //   - info.header / info.websites / info.socials = paid Enhanced Token
+      //     Info (profile claim) — much more reliable than relying on
+      //     /token-profiles/latest which only holds 30 most recent globally
+      type Sig = { boost: number; profile: boolean };
+      const sigByToken = new Map<string, Sig>();
       for (const p of pairs) {
         const baseAddr = p.baseToken?.address?.toLowerCase();
+        if (!baseAddr) continue;
         const active = p.boosts?.active ?? 0;
-        if (baseAddr && active > 0) {
-          boostByToken.set(
-            baseAddr,
-            Math.max(boostByToken.get(baseAddr) ?? 0, active),
-          );
-        }
+        const info = p.info;
+        const hasProfile =
+          !!info?.header ||
+          (info?.websites?.length ?? 0) > 0 ||
+          (info?.socials?.length ?? 0) > 0;
+        if (!active && !hasProfile) continue;
+        const prev = sigByToken.get(baseAddr) ?? { boost: 0, profile: false };
+        sigByToken.set(baseAddr, {
+          boost: Math.max(prev.boost, active),
+          profile: prev.profile || hasProfile,
+        });
       }
-      for (const [addr, active] of boostByToken) {
+      for (const [addr, sig] of sigByToken) {
         const prev = state.get(addr);
         let bankr = prev?.bankr;
         if (bankr === undefined) {
@@ -103,9 +113,9 @@ async function pollOnce() {
         if (!bankr) continue;
         state.set(addr, {
           address: addr,
-          boostAmount: active,
-          totalBoostAmount: Math.max(prev?.totalBoostAmount ?? 0, active),
-          hasProfile: prev?.hasProfile === true,
+          boostAmount: sig.boost,
+          totalBoostAmount: Math.max(prev?.totalBoostAmount ?? 0, sig.boost),
+          hasProfile: sig.profile || prev?.hasProfile === true,
           firstPaidAt: prev?.firstPaidAt ?? now,
           lastSeenAt: now,
           bankr,
@@ -114,11 +124,13 @@ async function pollOnce() {
       // Decay: if an address was previously boosted but pair shows 0 now,
       // keep the entry (so it stays surfaced) but set boostAmount=0 so the
       // UI can decide to hide expired boosts. hasProfile / firstPaidAt stay.
+      const sweptSet = new Set(knownBankrAddrs);
       for (const [addr, entry] of state) {
-        if (entry.boostAmount > 0 && !boostByToken.has(addr)) {
-          // pair sweep didn't include this address (not in launchCache yet) —
-          // leave untouched
-          if (!knownBankrAddrs.includes(addr)) continue;
+        if (
+          entry.boostAmount > 0 &&
+          !sigByToken.has(addr) &&
+          sweptSet.has(addr)
+        ) {
           state.set(addr, { ...entry, boostAmount: 0 });
         }
       }
@@ -149,17 +161,18 @@ async function backfillKnownDeployers() {
   if (globalThis.__bnkrScreenerBackfillDone) return;
   globalThis.__bnkrScreenerBackfillDone = true;
   try {
-    const launches = await fetchBankrLaunches();
+    // Harvest distinct deployer addresses from EVERY launch in launchCache
+    // (not just the recent 50). As launchCache grows, this set grows, and
+    // each subsequent run picks up new deployers.
+    await fetchBankrLaunches().catch(() => []); // populate latest first
     const seen = new Set<string>();
-    const deployers: string[] = [];
-    for (const l of launches) {
-      const addr = l.deployer.walletAddress.toLowerCase();
-      if (seen.has(addr)) continue;
-      seen.add(addr);
-      deployers.push(addr);
+    for (const [, entry] of __launchCacheForWatcher) {
+      const dep = entry.value?.deployer?.walletAddress?.toLowerCase();
+      if (dep) seen.add(dep);
     }
-    // Sequential — relies on the bankrLimit(2) inside backfillDeployerHistory
-    // to keep us from spiking. Logs each one so we can watch progress.
+    const deployers = Array.from(seen);
+    // Sequential — relies on bankrLimit(2) inside backfillDeployerHistory
+    // to pace requests. May take a few minutes for 60+ deployers.
     let total = 0;
     for (const addr of deployers) {
       const n = await backfillDeployerHistory(addr).catch(() => 0);

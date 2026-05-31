@@ -42,6 +42,13 @@ export type DexPair = {
   marketCap?: number;
   pairCreatedAt?: number;
   boosts?: { active?: number };
+  info?: {
+    imageUrl?: string;
+    header?: string;
+    openGraph?: string;
+    websites?: Array<{ url: string; label?: string }>;
+    socials?: Array<{ url: string; type?: string }>;
+  };
 };
 
 export type DexPaidStatus = {
