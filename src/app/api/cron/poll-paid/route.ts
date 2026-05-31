@@ -20,7 +20,7 @@ async function notify(entries: PaidEntry[]) {
       headers: {
         "Title": `${kind} — ${name} ${symbol}`.trim(),
         "Click": url,
-        "Priority": e.boostAmount > 0 ? "high" : "default",
+        "Priority": "high",
       },
       body: url,
     }).catch(() => {});
