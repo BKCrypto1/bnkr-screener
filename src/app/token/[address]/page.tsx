@@ -215,11 +215,13 @@ export default async function TokenPage({
               : launch.deployer.walletAddress
           }
           mono={!launch.deployer.xUsername}
+          href={launch.tweetUrl}
           extra={
             deployerSummary
               ? `${deployerSummary.count}${deployerSummary.truncated ? "+" : ""} lifetime launches`
               : undefined
           }
+          extraHref={`/deployer/${launch.deployer.walletAddress}`}
         />
         <KV label="Launch type" value={launch.launchType} />
         <KV label="Chain" value={launch.chain} />
@@ -277,21 +279,35 @@ function KV({
   label,
   value,
   mono,
+  href,
   extra,
+  extraHref,
 }: {
   label: string;
   value: string;
   mono?: boolean;
+  href?: string;
   extra?: string;
+  extraHref?: string;
 }) {
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-950 px-4 py-3">
       <div className="text-xs uppercase tracking-wide text-zinc-500">{label}</div>
       <div className={`mt-1 break-all ${mono ? "font-mono text-xs" : ""}`}>
-        {value}
+        {href ? (
+          <a href={href} target="_blank" rel="noopener noreferrer" className="hover:text-zinc-100 underline underline-offset-2">
+            {value}
+          </a>
+        ) : value}
       </div>
       {extra && (
-        <div className="mt-1 text-xs text-amber-400/80">{extra}</div>
+        <div className="mt-1 text-xs text-amber-400/80">
+          {extraHref ? (
+            <Link href={extraHref} className="hover:text-amber-300 underline underline-offset-2">
+              {extra}
+            </Link>
+          ) : extra}
+        </div>
       )}
     </div>
   );
