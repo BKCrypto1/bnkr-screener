@@ -77,7 +77,9 @@ export async function pollOnce(): Promise<PaidEntry[]> {
       bankr,
     };
     await redis.hset(K.paid, { [addr]: entry }).catch(() => {});
-    if (!prev) newEntries.push(entry);
+    const isNewBoost = (prev?.boostAmount ?? 0) === 0 && sig.boostAmount > 0;
+    const isNewProfile = !prev?.hasProfile && sig.hasProfile;
+    if (!prev || isNewBoost || isNewProfile) newEntries.push(entry);
   }
 
   // Step 2: Check every token in the current Bankr top-50 individually.
@@ -105,7 +107,9 @@ export async function pollOnce(): Promise<PaidEntry[]> {
       bankr: launch,
     };
     await redis.hset(K.paid, { [addr]: entry }).catch(() => {});
-    if (!alreadyKnown) newEntries.push(entry);
+    const isNewBoost = (alreadyKnown?.boostAmount ?? 0) === 0 && active > 0;
+    const isNewProfile = !alreadyKnown?.hasProfile && hasProfile;
+    if (!alreadyKnown || isNewBoost || isNewProfile) newEntries.push(entry);
   }
 
   // Step 3: Re-check all currently known paid tokens — runs every 5 minutes.

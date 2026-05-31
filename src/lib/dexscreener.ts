@@ -17,7 +17,7 @@ export type PaidSignal = {
 };
 
 let paidBaseCache: { value: PaidSignal[]; expiresAt: number } | null = null;
-const PAID_BASE_TTL_MS = 5 * 60 * 1000;
+const PAID_BASE_TTL_MS = 50 * 1000; // just under cron interval so warm instances still refetch
 
 function chunk<T>(arr: T[], size: number): T[][] {
   const out: T[][] = [];
