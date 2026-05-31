@@ -32,12 +32,13 @@ export function LaunchRateChart({ buckets }: { buckets: RateBucket[] }) {
   const labelEvery = 16;
 
   return (
-    <div className="relative w-full select-none" style={{ height: TOTAL_H }}>
+    <div className="relative w-full select-none">
       <svg
         width="100%"
         height={CHART_H}
         viewBox={`0 0 ${buckets.length} ${CHART_H}`}
         preserveAspectRatio="none"
+        style={{ display: "block" }}
         className="overflow-visible"
       >
         {/* Gridlines */}
