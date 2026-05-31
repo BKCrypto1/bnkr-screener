@@ -9,11 +9,11 @@ export type RateBucket = {
 };
 
 export function LaunchRateChart({ buckets }: { buckets: RateBucket[] }) {
-  const [tooltip, setTooltip] = useState<{ x: number; y: number; bucket: RateBucket } | null>(null);
+  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const max = Math.max(...buckets.map((b) => b.count), 1);
   const CHART_H = 120;
-  const LABEL_H = 20;
-  const TOTAL_H = CHART_H + LABEL_H;
+  const LABEL_H = 24;
+  const labelEvery = 16;
 
   function fmtBucketTime(ts: number) {
     const d = new Date(ts);
@@ -28,66 +28,72 @@ export function LaunchRateChart({ buckets }: { buckets: RateBucket[] }) {
     return `${fmtBucketTime(ts)} – ${fmtBucketTime(ts + 15 * 60_000)}`;
   }
 
-  // Show x-axis label every 16 buckets (4 hours)
-  const labelEvery = 16;
+  const hoveredBucket = hoveredIdx !== null ? buckets[hoveredIdx] : null;
 
   return (
-    <div className="relative w-full select-none">
-      <svg
-        width="100%"
-        height={CHART_H}
-        viewBox={`0 0 ${buckets.length} ${CHART_H}`}
-        preserveAspectRatio="none"
-        style={{ display: "block" }}
-        className="overflow-visible"
-      >
+    <div className="w-full select-none">
+      {/* Chart area */}
+      <div className="relative w-full" style={{ height: CHART_H }}>
         {/* Gridlines */}
         {[0.25, 0.5, 0.75, 1].map((pct) => (
-          <line
+          <div
             key={pct}
-            x1={0} y1={CHART_H - pct * CHART_H}
-            x2={buckets.length} y2={CHART_H - pct * CHART_H}
-            stroke="#27272a" strokeWidth="0.3"
+            className="absolute left-0 right-0"
+            style={{ bottom: `${pct * 100}%`, borderTop: "1px solid #27272a" }}
           />
         ))}
 
         {/* Bars */}
-        {buckets.map((b, i) => {
-          const barH = (b.count / max) * CHART_H;
-          const y = CHART_H - barH;
-          const fill = b.count === 0
-            ? "#18181b"
-            : b.isCurrent
-            ? "#a78bfa"
-            : "#6d28d9";
-          return (
-            <rect
-              key={b.ts}
-              x={i + 0.1}
-              y={y}
-              width={0.8}
-              height={Math.max(barH, b.count > 0 ? 0.5 : 0)}
-              fill={fill}
-              opacity={b.count > 0 ? 1 : 0.3}
-              onMouseEnter={(e) => {
-                const rect = (e.target as SVGRectElement).closest("svg")!.getBoundingClientRect();
-                setTooltip({ x: e.clientX - rect.left, y: e.clientY - rect.top, bucket: b });
-              }}
-              onMouseLeave={() => setTooltip(null)}
-              className="cursor-crosshair"
-            />
-          );
-        })}
-      </svg>
+        <div className="absolute inset-0 flex items-end" style={{ gap: "1px" }}>
+          {buckets.map((b, i) => {
+            const heightPct = b.count > 0 ? Math.max((b.count / max) * 100, 0.5) : 0;
+            const bg = b.count === 0 ? "#18181b" : b.isCurrent ? "#a78bfa" : "#6d28d9";
+            return (
+              <div
+                key={b.ts}
+                className="flex-1 flex items-end cursor-crosshair"
+                style={{ height: "100%" }}
+                onMouseEnter={() => setHoveredIdx(i)}
+                onMouseLeave={() => setHoveredIdx(null)}
+              >
+                <div
+                  className="w-full"
+                  style={{
+                    height: b.count > 0 ? `${heightPct}%` : "2px",
+                    backgroundColor: bg,
+                    opacity: b.count > 0 ? 1 : 0.3,
+                  }}
+                />
+              </div>
+            );
+          })}
+        </div>
 
-      {/* X-axis labels as HTML to avoid stretching from preserveAspectRatio="none" */}
+        {/* Tooltip */}
+        {hoveredBucket !== null && hoveredIdx !== null && (
+          <div
+            className="absolute z-10 pointer-events-none bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-xs shadow-lg"
+            style={{
+              bottom: "calc(100% + 6px)",
+              left: `${((hoveredIdx + 0.5) / buckets.length) * 100}%`,
+              transform: hoveredIdx > buckets.length * 0.7 ? "translateX(-100%)" : "translateX(-50%)",
+            }}
+          >
+            <div className="text-zinc-300 font-mono whitespace-nowrap">{fmtRange(hoveredBucket.ts)}</div>
+            <div className="text-violet-300 font-semibold">{hoveredBucket.count} launches</div>
+            {hoveredBucket.isCurrent && <div className="text-zinc-500 text-[10px]">in progress</div>}
+          </div>
+        )}
+      </div>
+
+      {/* X-axis labels */}
       <div className="relative w-full" style={{ height: LABEL_H }}>
         {buckets.map((b, i) => {
           if (i % labelEvery !== 0) return null;
           return (
             <span
               key={b.ts}
-              className="absolute text-[10px] text-zinc-500 -translate-x-1/2"
+              className="absolute text-[10px] text-zinc-500 -translate-x-1/2 whitespace-nowrap"
               style={{ left: `${((i + 0.5) / buckets.length) * 100}%`, top: 4 }}
             >
               {fmtBucketTime(b.ts)}
@@ -95,22 +101,6 @@ export function LaunchRateChart({ buckets }: { buckets: RateBucket[] }) {
           );
         })}
       </div>
-
-      {/* Tooltip */}
-      {tooltip && (
-        <div
-          className="absolute z-10 pointer-events-none bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-xs shadow-lg"
-          style={{
-            left: tooltip.x + 8,
-            top: Math.max(0, tooltip.y - 40),
-            transform: tooltip.x > (buckets.length * 0.7) ? "translateX(calc(-100% - 16px))" : undefined,
-          }}
-        >
-          <div className="text-zinc-300 font-mono">{fmtRange(tooltip.bucket.ts)}</div>
-          <div className="text-violet-300 font-semibold">{tooltip.bucket.count} launches</div>
-          {tooltip.bucket.isCurrent && <div className="text-zinc-500 text-[10px]">in progress</div>}
-        </div>
-      )}
     </div>
   );
 }
