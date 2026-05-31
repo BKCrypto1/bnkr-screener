@@ -322,7 +322,18 @@ function deployerCountClass(n: number): string {
   return "text-zinc-400";
 }
 
-function boostTitle(p: NonNullable<EnrichedLaunch["dexPaid"]>): string {
+function fmtAgo(ts: number | undefined): string {
+  if (!ts) return "";
+  const diff = Date.now() - ts;
+  const m = Math.floor(diff / 60_000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+function boostTitle(p: NonNullable<EnrichedLaunch["dexPaid"]>, launch: EnrichedLaunch): string {
   if (!p.boosted) return "";
   const tier = boostTierFor(p.boostAmount);
   const lines: string[] = [];
@@ -335,6 +346,8 @@ function boostTitle(p: NonNullable<EnrichedLaunch["dexPaid"]>): string {
     const lifetime = estimateBoostSpend(p.totalBoostAmount);
     lines.push(`Lifetime: ${p.totalBoostAmount}x (~$${lifetime})`);
   }
+  if (launch.lastBoostedAt) lines.push(`Last boosted: ${fmtAgo(launch.lastBoostedAt)}`);
+  if (launch.firstPaidAt) lines.push(`First paid: ${fmtAgo(launch.firstPaidAt)}`);
   return lines.join(" · ");
 }
 
@@ -416,7 +429,7 @@ function Row({
               {launch.dexPaid?.boosted && launch.dexPaid.boostAmount > 0 && (
                 <span
                   className={`inline-flex items-center gap-0.5 font-mono ${boostColorClass(launch.dexPaid.boostAmount)}`}
-                  title={boostTitle(launch.dexPaid)}
+                  title={boostTitle(launch.dexPaid, launch)}
                 >
                   ⚡ {launch.dexPaid.boostAmount}x
                 </span>
@@ -424,7 +437,7 @@ function Row({
               {launch.dexPaid?.hasProfile && (
                 <span
                   className="inline-flex items-center font-mono text-cyan-300"
-                  title="DexScreener profile claim (paid one-time)"
+                  title={`DexScreener profile claim (paid one-time)${launch.lastProfileAt ? ` · Last seen: ${fmtAgo(launch.lastProfileAt)}` : ""}${launch.firstPaidAt ? ` · First paid: ${fmtAgo(launch.firstPaidAt)}` : ""}`}
                 >
                   💎
                 </span>

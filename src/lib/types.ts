@@ -65,4 +65,6 @@ export type EnrichedLaunch = BankrLaunch & {
   dexPaid?: DexPaidStatus;
   /** Timestamp (ms) when this token was first observed as paid by the watcher */
   firstPaidAt?: number;
+  lastBoostedAt?: number;
+  lastProfileAt?: number;
 };

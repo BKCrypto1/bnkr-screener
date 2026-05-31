@@ -10,6 +10,8 @@ export type PaidEntry = {
   hasProfile: boolean;
   firstPaidAt: number;
   lastSeenAt: number;
+  lastBoostedAt?: number;
+  lastProfileAt?: number;
   bankr?: BankrLaunch | null;
 };
 
@@ -74,6 +76,8 @@ export async function pollOnce(): Promise<void> {
           hasProfile: sig.hasProfile || prev?.hasProfile === true,
           firstPaidAt: prev?.firstPaidAt ?? now,
           lastSeenAt: now,
+          lastBoostedAt: sig.boostAmount > 0 ? now : prev?.lastBoostedAt,
+          lastProfileAt: sig.hasProfile ? now : prev?.lastProfileAt,
           bankr,
         } satisfies PaidEntry,
       })
@@ -101,6 +105,8 @@ export async function pollOnce(): Promise<void> {
           hasProfile,
           firstPaidAt: prev?.firstPaidAt ?? now,
           lastSeenAt: now,
+          lastBoostedAt: active > 0 ? now : prev?.lastBoostedAt,
+          lastProfileAt: hasProfile ? now : prev?.lastProfileAt,
           bankr: launch,
         } satisfies PaidEntry,
       })
@@ -131,6 +137,8 @@ export async function pollOnce(): Promise<void> {
           ),
           hasProfile: isPaidProfile(best),
           lastSeenAt: now,
+          lastBoostedAt: (best.boosts?.active ?? 0) > 0 ? now : entry.lastBoostedAt,
+          lastProfileAt: isPaidProfile(best) ? now : entry.lastProfileAt,
         } satisfies PaidEntry,
       })
       .catch(() => {});

@@ -104,7 +104,7 @@ export async function getEnrichedLaunchesResult(): Promise<EnrichedLaunchesResul
 
 function overlayPaid(
   l: EnrichedLaunch,
-  pe: { boostAmount: number; totalBoostAmount: number; hasProfile: boolean; firstPaidAt: number },
+  pe: { boostAmount: number; totalBoostAmount: number; hasProfile: boolean; firstPaidAt: number; lastBoostedAt?: number; lastProfileAt?: number },
 ): EnrichedLaunch {
   const existing = l.dexPaid;
   const boostAmount = Math.max(existing?.boostAmount ?? 0, pe.boostAmount);
@@ -121,6 +121,8 @@ function overlayPaid(
       orderTypes: existing?.orderTypes ?? [],
     },
     firstPaidAt: pe.firstPaidAt,
+    lastBoostedAt: pe.lastBoostedAt,
+    lastProfileAt: pe.lastProfileAt,
   };
 }
 
