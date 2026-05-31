@@ -13,4 +13,8 @@ export const K = {
   /** Hash: field = token address, value = PaidEntry */
   paid: "bnkr:paid",
   cronLock: "bnkr:cron:lock",
+  /** Hash: field = 15-min bucket timestamp (ms), value = launch count */
+  launchRate: "bnkr:launch-rate",
+  /** Most recent launch timestamp seen by the cron */
+  lastLaunchTs: "bnkr:last-launch-ts",
 } as const;

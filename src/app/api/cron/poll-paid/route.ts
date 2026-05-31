@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { fetchBankrLaunches } from "@/lib/bankr";
 import { pollOnce } from "@/lib/paid-watcher";
 import type { PaidEntry } from "@/lib/paid-watcher";
 
@@ -46,8 +47,29 @@ export async function GET(request: NextRequest) {
 
   try {
     const start = Date.now();
-    const newEntries = await pollOnce();
+    const now = start;
+    const BUCKET_MS = 15 * 60_000;
+
+    const [newEntries, launches] = await Promise.all([
+      pollOnce(),
+      fetchBankrLaunches().catch(() => []),
+    ]);
     const notified = await notify(newEntries);
+
+    // Track launch rate — compare top-50 against last-seen timestamp
+    if (launches.length > 0) {
+      const lastTs = await redis.get<number>(K.lastLaunchTs).catch(() => null) ?? 0;
+      const fresh = launches.filter((l) => l.timestamp > lastTs);
+      if (fresh.length > 0) {
+        const maxTs = Math.max(...fresh.map((l) => l.timestamp));
+        const bucket = String(Math.floor(now / BUCKET_MS) * BUCKET_MS);
+        await Promise.all([
+          redis.hincrby(K.launchRate, bucket, fresh.length).catch(() => {}),
+          redis.set(K.lastLaunchTs, maxTs).catch(() => {}),
+        ]);
+      }
+    }
+
     return NextResponse.json({ ok: true, ms: Date.now() - start, new: newEntries.length, notified });
   } finally {
     await redis.del(K.cronLock);
