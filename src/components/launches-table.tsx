@@ -75,8 +75,37 @@ export function LaunchesTable({
 
   type PaidNotif = { id: number; launch: EnrichedLaunch; kind: "boost" | "profile" | "both" };
   const [notifications, setNotifications] = useState<PaidNotif[]>([]);
+  const [soundOn, setSoundOn] = useState(false);
   const seenPaidRef = useRef<Set<string> | null>(null);
   const notifIdRef = useRef(0);
+
+  // Persist sound preference
+  useEffect(() => {
+    setSoundOn(localStorage.getItem("bnkr:sound") === "1");
+  }, []);
+  function toggleSound() {
+    setSoundOn((v) => {
+      localStorage.setItem("bnkr:sound", v ? "0" : "1");
+      return !v;
+    });
+  }
+
+  function playDing() {
+    try {
+      const ctx = new AudioContext();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(660, ctx.currentTime + 0.15);
+      gain.gain.setValueAtTime(0.25, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.6);
+    } catch { /* AudioContext blocked — ignore */ }
+  }
 
   useEffect(() => {
     const id = setInterval(() => tick((n) => n + 1), 1000);
@@ -121,8 +150,10 @@ export function LaunchesTable({
                 toNotify.push({ id: ++notifIdRef.current, launch: l, kind });
               }
             }
-            if (toNotify.length > 0)
+            if (toNotify.length > 0) {
               setNotifications((prev) => [...toNotify, ...prev].slice(0, 5));
+              if (soundOn) playDing();
+            }
           }
         }
       } catch {
@@ -263,7 +294,14 @@ export function LaunchesTable({
             {v === "live" ? "Live Launches" : `Paid History${paidHistory.length > 0 ? ` (${paidHistory.length})` : ""}`}
           </button>
         ))}
-        <div className="ml-auto text-xs text-zinc-500 flex items-center gap-2 tabular-nums">
+        <div className="ml-auto text-xs text-zinc-500 flex items-center gap-3 tabular-nums">
+          <button
+            onClick={toggleSound}
+            title={soundOn ? "Sound on — click to mute" : "Sound off — click to enable"}
+            className={`transition-colors ${soundOn ? "text-zinc-200" : "text-zinc-600 hover:text-zinc-400"}`}
+          >
+            {soundOn ? "🔔" : "🔕"}
+          </button>
           <span
             className={`inline-block h-1.5 w-1.5 rounded-full transition-colors ${refreshing ? "bg-violet-400" : "bg-emerald-500/70"}`}
             title={refreshing ? "refreshing…" : "live"}
