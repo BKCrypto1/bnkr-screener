@@ -212,6 +212,11 @@ export function LaunchesTable({
     return sorted;
   }, [data, extraPaid, query, sortKey, sortDir, tradedOnly, paidOnly, ageFilter, deployerFilter]);
 
+  const tradedCount = useMemo(
+    () => data.filter((l) => (l.pair?.volume?.h24 ?? 0) > 0).length,
+    [data],
+  );
+
   const hiddenCount = useMemo(
     () => tradedOnly ? data.filter((l) => (l.pair?.volume?.h24 ?? 0) === 0).length : 0,
     [data, tradedOnly],
@@ -323,7 +328,7 @@ export function LaunchesTable({
             />
             <FilterBtn active={tradedOnly} onClick={() => setTradedOnly((v) => !v)}
               title={tradedOnly && hiddenCount > 0 ? `${hiddenCount} tokens hidden (no 24h volume)` : "Only show tokens with 24h trading volume"}>
-              Traded
+              Traded{tradedCount > 0 && <span className="ml-1.5 text-zinc-500">{tradedCount}</span>}
             </FilterBtn>
             <FilterBtn active={paidOnly} onClick={() => setPaidOnly((v) => !v)} color="yellow"
               title={`${paidStats.count} paid (${paidStats.boosted} boost · ${paidStats.profile} profile)`}>
