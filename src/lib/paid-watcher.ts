@@ -51,8 +51,9 @@ function bestPairFor(
  * token has an active boost or a paid profile — both are visible per-token
  * via fetchDexPairsForToken (single-address, no 30-pair cap).
  */
-export async function pollOnce(): Promise<void> {
+export async function pollOnce(): Promise<PaidEntry[]> {
   const now = Date.now();
+  const newEntries: PaidEntry[] = [];
 
   // Step 1: Global feeds — discover newly paid Base tokens.
   const signals = await fetchPaidBaseSignals().catch(() => []);
@@ -64,24 +65,19 @@ export async function pollOnce(): Promise<void> {
       bankr = await fetchBankrLaunch(addr).catch(() => null);
     }
     if (!bankr) continue;
-    await redis
-      .hset(K.paid, {
-        [addr]: {
-          address: addr,
-          boostAmount: Math.max(sig.boostAmount, prev?.boostAmount ?? 0),
-          totalBoostAmount: Math.max(
-            sig.boostAmount,
-            prev?.totalBoostAmount ?? 0,
-          ),
-          hasProfile: sig.hasProfile || prev?.hasProfile === true,
-          firstPaidAt: prev?.firstPaidAt ?? now,
-          lastSeenAt: now,
-          lastBoostedAt: sig.boostAmount > 0 ? now : prev?.lastBoostedAt,
-          lastProfileAt: sig.hasProfile ? now : prev?.lastProfileAt,
-          bankr,
-        } satisfies PaidEntry,
-      })
-      .catch(() => {});
+    const entry: PaidEntry = {
+      address: addr,
+      boostAmount: Math.max(sig.boostAmount, prev?.boostAmount ?? 0),
+      totalBoostAmount: Math.max(sig.boostAmount, prev?.totalBoostAmount ?? 0),
+      hasProfile: sig.hasProfile || prev?.hasProfile === true,
+      firstPaidAt: prev?.firstPaidAt ?? now,
+      lastSeenAt: now,
+      lastBoostedAt: sig.boostAmount > 0 ? now : prev?.lastBoostedAt,
+      lastProfileAt: sig.hasProfile ? now : prev?.lastProfileAt,
+      bankr,
+    };
+    await redis.hset(K.paid, { [addr]: entry }).catch(() => {});
+    if (!prev) newEntries.push(entry);
   }
 
   // Step 2: Check every token in the current Bankr top-50 individually.
@@ -96,27 +92,26 @@ export async function pollOnce(): Promise<void> {
     const active = best.boosts?.active ?? 0;
     const hasProfile = isPaidProfile(best);
     if (!active && !hasProfile) continue;
-    await redis
-      .hset(K.paid, {
-        [addr]: {
-          address: addr,
-          boostAmount: active,
-          totalBoostAmount: active,
-          hasProfile,
-          firstPaidAt: now,
-          lastSeenAt: now,
-          lastBoostedAt: active > 0 ? now : undefined,
-          lastProfileAt: hasProfile ? now : undefined,
-          bankr: launch,
-        } satisfies PaidEntry,
-      })
-      .catch(() => {});
+    const alreadyKnown = await redis.hget<PaidEntry>(K.paid, addr).catch(() => null);
+    const entry: PaidEntry = {
+      address: addr,
+      boostAmount: active,
+      totalBoostAmount: active,
+      hasProfile,
+      firstPaidAt: now,
+      lastSeenAt: now,
+      lastBoostedAt: active > 0 ? now : undefined,
+      lastProfileAt: hasProfile ? now : undefined,
+      bankr: launch,
+    };
+    await redis.hset(K.paid, { [addr]: entry }).catch(() => {});
+    if (!alreadyKnown) newEntries.push(entry);
   }
 
   // Step 3: Re-check all currently known paid tokens — runs every 5 minutes.
   // Reduces hgetall + per-token hset ops from 1440/day to ~288/day.
   const cronMinute = Math.floor(now / 60_000);
-  if (cronMinute % 5 !== 0) return;
+  if (cronMinute % 5 !== 0) return newEntries;
 
   const allPaid =
     (await redis.hgetall<Record<string, PaidEntry>>(K.paid).catch(() => null)) ??
@@ -152,6 +147,7 @@ export async function pollOnce(): Promise<void> {
       .hdel(K.paid, ...(toDelete as [string, ...string[]]))
       .catch(() => {});
   }
+  return newEntries;
 }
 
 /** All currently tracked paid Bankr launches. Called on every page render. */
