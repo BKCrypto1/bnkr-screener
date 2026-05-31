@@ -5,7 +5,18 @@ export function fmtUsd(n: number | undefined | null): string {
   if (n >= 1_000) return `$${(n / 1_000).toFixed(2)}K`;
   if (n >= 1) return `$${n.toFixed(2)}`;
   if (n >= 0.01) return `$${n.toFixed(4)}`;
-  return `$${n.toPrecision(3)}`;
+  // Avoid scientific notation for micro prices: show full decimal up to 12 places
+  const str = n.toFixed(20);
+  const match = str.match(/^0\.(0*)([1-9]\d{0,3})/);
+  if (!match || match[1].length > 12) return `$${n.toPrecision(3)}`;
+  return `$0.${match[1]}${match[2]}`;
+}
+
+export function fmtTokenAmount(n: number): string {
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B`;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(2)}K`;
+  return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
 export function fmtPrice(p: string | undefined): string {

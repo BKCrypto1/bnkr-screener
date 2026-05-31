@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { GtTrade } from "@/lib/geckoterminal";
-import { fmtAge, fmtUsd, shortAddr } from "@/lib/format";
+import { fmtAge, fmtTokenAmount, fmtUsd, shortAddr } from "@/lib/format";
 
 export function TradesTable({
   pool,
@@ -135,16 +135,14 @@ export function TradesTable({
                   >
                     {t.kind}
                   </td>
-                  <td className="px-3 py-1.5 text-right font-mono">
+                  <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap">
                     {fmtUsd(t.volumeUsd)}
                   </td>
-                  <td className="px-3 py-1.5 text-right font-mono text-zinc-300">
+                  <td className="px-3 py-1.5 text-right font-mono text-zinc-300 whitespace-nowrap">
                     {fmtUsd(priceUsd)}
                   </td>
-                  <td className="px-3 py-1.5 text-right font-mono text-zinc-400">
-                    {tokenAmount.toLocaleString(undefined, {
-                      maximumFractionDigits: 2,
-                    })}
+                  <td className="px-3 py-1.5 text-right font-mono text-zinc-400 whitespace-nowrap">
+                    {fmtTokenAmount(tokenAmount)}
                   </td>
                   <td className="px-3 py-1.5 font-mono whitespace-nowrap">
                     {isDeployer && deployerXUsername ? (
