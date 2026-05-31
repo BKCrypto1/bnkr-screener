@@ -22,7 +22,6 @@ type SortKey =
 type SortDir = "asc" | "desc";
 type AgeFilter = "all" | "1h" | "4h" | "24h";
 type DeployerFilter = "all" | "new" | "few" | "many";
-type View = "live" | "history";
 
 const AGE_MS: Record<Exclude<AgeFilter, "all">, number> = {
   "1h": 3_600_000,
@@ -68,7 +67,6 @@ export function LaunchesTable({
   const [paidOnly, setPaidOnly] = useState(false);
   const [ageFilter, setAgeFilter] = useState<AgeFilter>("all");
   const [deployerFilter, setDeployerFilter] = useState<DeployerFilter>("all");
-  const [view, setView] = useState<View>("live");
   const [lastUpdated, setLastUpdated] = useState<number>(Date.now());
   const [refreshing, setRefreshing] = useState(false);
   const [, tick] = useState(0);
@@ -267,15 +265,6 @@ export function LaunchesTable({
     return { count: all.size, boosted, profile };
   }, [data, extraPaid]);
 
-  // History: all paid tokens merged, sorted by firstPaidAt desc
-  const paidHistory = useMemo(() => {
-    const all = new Map<string, EnrichedLaunch>();
-    for (const l of [...data, ...extraPaid]) {
-      if ((l.dexPaid?.boosted || l.dexPaid?.hasProfile) && l.firstPaidAt)
-        all.set(l.tokenAddress.toLowerCase(), l);
-    }
-    return [...all.values()].sort((a, b) => (b.firstPaidAt ?? 0) - (a.firstPaidAt ?? 0));
-  }, [data, extraPaid]);
 
   function onSort(key: SortKey) {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -284,22 +273,9 @@ export function LaunchesTable({
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Tab row */}
-      <div className="flex items-center gap-2 border-b border-zinc-800 pb-1">
-        {(["live", "history"] as View[]).map((v) => (
-          <button
-            key={v}
-            onClick={() => setView(v)}
-            className={`text-xs px-3 py-1.5 rounded-md transition-colors capitalize ${
-              view === v
-                ? "bg-zinc-800 text-zinc-100"
-                : "text-zinc-500 hover:text-zinc-300"
-            }`}
-          >
-            {v === "live" ? "Live Launches" : `Paid History${paidHistory.length > 0 ? ` (${paidHistory.length})` : ""}`}
-          </button>
-        ))}
-        <div className="ml-auto text-xs text-zinc-500 flex items-center gap-3 tabular-nums">
+      {/* Status row */}
+      <div className="flex items-center justify-end border-b border-zinc-800 pb-1">
+        <div className="text-xs text-zinc-500 flex items-center gap-3 tabular-nums">
           <button
             onClick={toggleSound}
             title={soundOn ? "Sound on — click to mute" : "Sound off — click to enable"}
@@ -315,8 +291,6 @@ export function LaunchesTable({
         </div>
       </div>
 
-      {view === "live" && (
-        <>
           {/* Filter bar */}
           <div className="flex items-center gap-2 flex-wrap">
             <input
@@ -381,8 +355,6 @@ export function LaunchesTable({
               </tbody>
             </table>
           </div>
-        </>
-      )}
 
       {/* Paid DEX notification toasts — bottom right */}
       {notifications.length > 0 && (
@@ -424,72 +396,6 @@ export function LaunchesTable({
         </div>
       )}
 
-      {view === "history" && (
-        <div className="overflow-x-auto rounded-lg border border-zinc-800 bg-zinc-950">
-          <table className="w-full text-sm">
-            <thead className="bg-zinc-900/60 text-xs uppercase tracking-wide text-zinc-400">
-              <tr>
-                <th className="text-left px-3 py-2 font-medium">Token</th>
-                <th className="text-right px-3 py-2 font-medium">Token Age</th>
-                <th className="text-right px-3 py-2 font-medium">First Paid</th>
-                <th className="text-right px-3 py-2 font-medium">Last Boost</th>
-                <th className="text-right px-3 py-2 font-medium">Boost</th>
-                <th className="text-right px-3 py-2 font-medium">Vol 24h</th>
-                <th className="text-right px-3 py-2 font-medium">Liquidity</th>
-              </tr>
-            </thead>
-            <tbody>
-              {paidHistory.map((l) => {
-                const img = ipfsToHttp(l.imageUri);
-                return (
-                  <tr key={l.tokenAddress} className="border-t border-zinc-900 hover:bg-zinc-900/40">
-                    <td className="px-3 py-2">
-                      <Link href={`/token/${l.tokenAddress}`} className="flex items-center gap-2 group">
-                        {img ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={img} alt="" className="h-7 w-7 rounded-full bg-zinc-800 object-cover" loading="lazy" />
-                        ) : (
-                          <div className="h-7 w-7 rounded-full bg-zinc-800 flex items-center justify-center text-[10px] text-zinc-500">
-                            {l.tokenSymbol.slice(0, 2).toUpperCase()}
-                          </div>
-                        )}
-                        <div className="flex flex-col">
-                          <span className="font-medium group-hover:text-violet-300">{l.tokenName}</span>
-                          <span className="text-xs text-zinc-500">{l.tokenSymbol}{l.deployer.xUsername && ` · @${l.deployer.xUsername}`}</span>
-                        </div>
-                      </Link>
-                    </td>
-                    <td className="px-3 py-2 text-right text-zinc-400 whitespace-nowrap tabular-nums" suppressHydrationWarning>
-                      {fmtAge(l.timestamp)}
-                    </td>
-                    <td className="px-3 py-2 text-right whitespace-nowrap tabular-nums text-emerald-400" suppressHydrationWarning>
-                      {fmtAgo(l.firstPaidAt)}
-                    </td>
-                    <td className="px-3 py-2 text-right whitespace-nowrap tabular-nums text-zinc-400" suppressHydrationWarning>
-                      {l.lastBoostedAt ? fmtAgo(l.lastBoostedAt) : l.dexPaid?.hasProfile ? "—" : "—"}
-                    </td>
-                    <td className="px-3 py-2 text-right whitespace-nowrap font-mono">
-                      {l.dexPaid?.boosted && l.dexPaid.boostAmount > 0 && (
-                        <span className={`mr-1 ${boostColorClass(l.dexPaid.boostAmount)}`}>⚡{l.dexPaid.boostAmount}x</span>
-                      )}
-                      {l.dexPaid?.hasProfile && <span className="text-cyan-300">💎</span>}
-                    </td>
-                    <td className="px-3 py-2 text-right font-mono tabular-nums text-zinc-300">
-                      {fmtUsd(l.pair?.volume?.h24)}
-                    </td>
-                    <td className="px-3 py-2 text-right font-mono tabular-nums text-zinc-300">
-                      {fmtUsd(l.pair?.liquidity?.usd)}
-                    </td>
-                  </tr>
-                );
-              })}
-              {paidHistory.length === 0 && (
-                <tr><td colSpan={7} className="px-3 py-12 text-center text-zinc-500">No paid tokens tracked yet. Check back after the cron has run.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
     </div>
   );
 }
