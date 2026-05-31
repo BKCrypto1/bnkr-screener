@@ -502,6 +502,18 @@ function Row({ launch, attempts = 1 }: { launch: EnrichedLaunch; attempts?: numb
                   💎
                 </span>
               )}
+              {launch.goplus && launch.goplus.whaleCount > 0 && (
+                <span className="inline-flex items-center font-mono text-rose-400"
+                  title={`${launch.goplus.whaleCount} wallet${launch.goplus.whaleCount > 1 ? "s" : ""} hold >5% · ${launch.goplus.largeCount} at 3–5% · ${launch.goplus.mediumCount} at 1–3%`}>
+                  🐋 ×{launch.goplus.whaleCount}
+                </span>
+              )}
+              {launch.goplus && launch.goplus.whaleCount === 0 && launch.goplus.largeCount > 0 && (
+                <span className="inline-flex items-center font-mono text-amber-400"
+                  title={`${launch.goplus.largeCount} wallet${launch.goplus.largeCount > 1 ? "s" : ""} hold 3–5% · ${launch.goplus.mediumCount} at 1–3%`}>
+                  🐋 ×{launch.goplus.largeCount}
+                </span>
+              )}
             </span>
           </div>
         </Link>

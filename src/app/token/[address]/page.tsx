@@ -8,6 +8,7 @@ import {
 } from "@/lib/dexscreener";
 import { redis, K } from "@/lib/redis";
 import type { PaidEntry } from "@/lib/paid-watcher";
+import type { GoplusResult } from "@/lib/types";
 import {
   boostColorClass,
   boostTierFor,
@@ -166,6 +167,10 @@ export default async function TokenPage({
         </div>
       </div>
 
+      {paidEntry?.goplus?.isInDex && (
+        <HolderConcentration goplus={paidEntry.goplus} />
+      )}
+
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <Stat label="Liquidity" value={fmtUsd(pair?.liquidity?.usd)} />
         <Stat label="Volume 24h" value={fmtUsd(pair?.volume?.h24)} />
@@ -313,6 +318,55 @@ function KV({
               {extra}
             </Link>
           ) : extra}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HolderConcentration({ goplus }: { goplus: GoplusResult }) {
+  const { whaleCount, largeCount, mediumCount, topHolders } = goplus;
+  const riskLabel = whaleCount > 0 ? "High Risk" : largeCount > 0 ? "Watch" : "Healthy";
+  const riskColor = whaleCount > 0 ? "text-rose-400" : largeCount > 0 ? "text-amber-400" : "text-emerald-400";
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-950 px-4 py-3">
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-xs uppercase tracking-wide text-zinc-500">Holder Concentration</div>
+        <span className={`text-xs font-mono ${riskColor}`}>{riskLabel}</span>
+      </div>
+      <div className="flex gap-4 text-xs mb-3">
+        <div className="flex flex-col items-center gap-0.5">
+          <span className={`font-mono text-base font-semibold ${whaleCount > 0 ? "text-rose-400" : "text-zinc-600"}`}>{whaleCount}</span>
+          <span className="text-zinc-500">&gt;5%</span>
+        </div>
+        <div className="flex flex-col items-center gap-0.5">
+          <span className={`font-mono text-base font-semibold ${largeCount > 0 ? "text-amber-400" : "text-zinc-600"}`}>{largeCount}</span>
+          <span className="text-zinc-500">3–5%</span>
+        </div>
+        <div className="flex flex-col items-center gap-0.5">
+          <span className={`font-mono text-base font-semibold ${mediumCount > 0 ? "text-yellow-500" : "text-zinc-600"}`}>{mediumCount}</span>
+          <span className="text-zinc-500">1–3%</span>
+        </div>
+      </div>
+      {topHolders.length > 0 && (
+        <div className="flex flex-col gap-1">
+          {topHolders.slice(0, 5).map((h) => {
+            const pct = h.percent * 100;
+            const color = pct > 5 ? "bg-rose-500" : pct >= 3 ? "bg-amber-500" : "bg-yellow-600";
+            return (
+              <div key={h.address} className="flex items-center gap-2 text-xs">
+                <span className="font-mono text-zinc-400 w-28 shrink-0">
+                  {h.address.slice(0, 6)}…{h.address.slice(-4)}
+                </span>
+                <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                  <div className={`h-full rounded-full ${color}`} style={{ width: `${Math.min(pct * 4, 100)}%` }} />
+                </div>
+                <span className={`font-mono w-10 text-right tabular-nums ${pct > 5 ? "text-rose-400" : pct >= 3 ? "text-amber-400" : "text-zinc-400"}`}>
+                  {pct.toFixed(1)}%
+                </span>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

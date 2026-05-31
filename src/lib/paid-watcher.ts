@@ -1,7 +1,8 @@
 import { fetchBankrLaunch, fetchBankrLaunches } from "./bankr";
 import { fetchDexPairs, fetchDexPairsForToken, fetchPaidBaseSignals } from "./dexscreener";
+import { fetchTokenSecurityBatch } from "./goplus";
 import { K, redis } from "./redis";
-import type { BankrLaunch } from "./types";
+import type { BankrLaunch, GoplusResult } from "./types";
 
 export type PaidEntry = {
   address: string;
@@ -13,6 +14,7 @@ export type PaidEntry = {
   lastBoostedAt?: number;
   lastProfileAt?: number;
   bankr?: BankrLaunch | null;
+  goplus?: GoplusResult;
 };
 
 const PRUNE_AFTER_MS = 14 * 24 * 60 * 60 * 1000;
@@ -120,6 +122,16 @@ export async function pollOnce(): Promise<PaidEntry[]> {
   const allPaid =
     (await redis.hgetall<Record<string, PaidEntry>>(K.paid).catch(() => null)) ??
     {};
+
+  // Batch-fetch GoPlus for tokens with missing or stale security data.
+  const GOPLUS_REFRESH_MS = 6 * 60 * 60 * 1000;
+  const needsGoplus = Object.entries(allPaid)
+    .filter(([, e]) => e.bankr && (!e.goplus || now - e.goplus.fetchedAt > GOPLUS_REFRESH_MS))
+    .map(([addr]) => addr);
+  const goplusMap = needsGoplus.length > 0
+    ? await fetchTokenSecurityBatch(needsGoplus).catch(() => ({} as Record<string, GoplusResult>))
+    : {} as Record<string, GoplusResult>;
+
   const toDelete: string[] = [];
   for (const [addr, entry] of Object.entries(allPaid)) {
     if (!entry.bankr || now - entry.lastSeenAt > PRUNE_AFTER_MS) {
@@ -141,6 +153,7 @@ export async function pollOnce(): Promise<PaidEntry[]> {
       lastSeenAt: now,
       lastBoostedAt: newBoost > 0 ? now : entry.lastBoostedAt,
       lastProfileAt: newProfile ? now : entry.lastProfileAt,
+      goplus: goplusMap[addr] ?? entry.goplus,
     };
     await redis.hset(K.paid, { [addr]: updated }).catch(() => {});
     if (isNewBoost || isNewProfile) newEntries.push(updated);

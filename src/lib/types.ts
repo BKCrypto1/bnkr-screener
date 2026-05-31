@@ -59,12 +59,27 @@ export type DexPaidStatus = {
   orderTypes: string[];
 };
 
+export type GoplusHolder = {
+  address: string;
+  percent: number; // 0–1 decimal
+};
+
+export type GoplusResult = {
+  fetchedAt: number;
+  isInDex: boolean;
+  isHoneypot: boolean;
+  whaleCount: number;  // EOA holders > 5%
+  largeCount: number;  // EOA holders 3–5%
+  mediumCount: number; // EOA holders 1–3%
+  topHolders: GoplusHolder[];
+};
+
 export type EnrichedLaunch = BankrLaunch & {
   pair?: DexPair;
   deployerLaunchCount?: number;
   dexPaid?: DexPaidStatus;
-  /** Timestamp (ms) when this token was first observed as paid by the watcher */
   firstPaidAt?: number;
   lastBoostedAt?: number;
   lastProfileAt?: number;
+  goplus?: GoplusResult;
 };
