@@ -81,10 +81,10 @@ export async function getEnrichedLaunchesResult(): Promise<EnrichedLaunchesResul
   });
 
   // Build extraPaid for paid Bankr launches that are NOT in the latest 50
-  // and were launched within the last 30 days.
+  // and were launched within the last 14 days.
   const recentSet = new Set(launches.map((l) => l.tokenAddress.toLowerCase()));
-  const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
-  const cutoff = Date.now() - THIRTY_DAYS_MS;
+  const FOURTEEN_DAYS_MS = 14 * 24 * 60 * 60 * 1000;
+  const cutoff = Date.now() - FOURTEEN_DAYS_MS;
   const extraEntries = paidEntries.filter(
     (e) =>
       !recentSet.has(e.address) &&

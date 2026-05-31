@@ -28,23 +28,45 @@ function chunk<T>(arr: T[], size: number): T[][] {
 export async function fetchDexPairs(addresses: string[]): Promise<DexPair[]> {
   if (addresses.length === 0) return [];
   const unique = Array.from(new Set(addresses.map((a) => a.toLowerCase())));
+  const headers = {
+    Accept: "application/json",
+    "User-Agent": "bnkrscreener/0.1 (+https://github.com/)",
+  };
   const groups = chunk(unique, CHUNK_SIZE);
   const results = await Promise.all(
     groups.map(async (group) => {
       const url = `${DEXSCREENER_TOKENS_URL}/${group.join(",")}`;
-      const res = await fetch(url, {
-        headers: {
-          Accept: "application/json",
-          "User-Agent": "bnkrscreener/0.1 (+https://github.com/)",
-        },
-        next: { revalidate: 10 },
-      });
+      const res = await fetch(url, { headers, next: { revalidate: 10 } });
       if (!res.ok) return [];
       const json = (await res.json()) as { pairs: DexPair[] | null };
       return json.pairs ?? [];
     }),
   );
   return results.flat();
+}
+
+/**
+ * Single-token pair fetch — reliable, no 30-pair cap (since only one
+ * token's pairs come back). Use for addresses where we need authoritative
+ * data (e.g. known-paid tokens). Costs one DexScreener call per address
+ * so don't blast.
+ */
+export async function fetchDexPairsForToken(
+  tokenAddress: string,
+): Promise<DexPair[]> {
+  const res = await fetch(
+    `${DEXSCREENER_TOKENS_URL}/${tokenAddress.toLowerCase()}`,
+    {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "bnkrscreener/0.1 (+https://github.com/)",
+      },
+      next: { revalidate: 10 },
+    },
+  );
+  if (!res.ok) return [];
+  const json = (await res.json()) as { pairs: DexPair[] | null };
+  return json.pairs ?? [];
 }
 
 export async function fetchDexPaidStatus(

@@ -5,14 +5,18 @@ import {
   fetchBankrLaunches,
 } from "./bankr";
 import { getOrCreateDiskMap } from "./disk-cache";
-import { fetchDexPairs, fetchPaidBaseSignals } from "./dexscreener";
+import {
+  fetchDexPairs,
+  fetchDexPairsForToken,
+  fetchPaidBaseSignals,
+} from "./dexscreener";
 import type { BankrLaunch } from "./types";
 
 const POLL_INTERVAL_MS = 10_000;
-// Pair sweeps every Nth tick — the sweep is expensive (one DexScreener call
-// per 30 addresses, and launchCache may have thousands of entries once
-// deployer-history backfill kicks in).
+// Discovery (rotating) sweep cadence — every N ticks.
 const SWEEP_EVERY_N_TICKS = 6; // → every 60s
+// How many addresses to scan per rotation cycle. ~2 batched DexScreener calls.
+const ROTATION_BATCH = 60;
 const CACHE_PATH = "/tmp/bankr-screener/paid-watcher.json";
 const GLOBAL_KEY = "__bnkrScreenerPaidState";
 
@@ -38,6 +42,8 @@ declare global {
   var __bnkrScreenerPaidRunning: boolean | undefined;
   // eslint-disable-next-line no-var
   var __bnkrScreenerPaidTickCount: number | undefined;
+  // eslint-disable-next-line no-var
+  var __bnkrScreenerSweepCursor: number | undefined;
 }
 
 async function pollOnce() {
@@ -70,68 +76,85 @@ async function pollOnce() {
       });
     }
 
-    // (2) Sweep all known Bankr launches via the batched pair endpoint —
-    // pair.boosts.active is the authoritative "currently boosted" field
-    // (much more reliable than /orders/v1 or /token-boosts/latest, which
-    // lag or drop entries). Throttled to every 60s to keep DexScreener
-    // load reasonable as launchCache grows from deployer-history backfill.
+    // (2) Always: re-check currently-known paid addresses INDIVIDUALLY.
+    // Using fetchDexPairsForToken (one address per call) avoids the
+    // 30-pair cap of batched calls. With ~10 paid tokens this is ~10
+    // requests per 10s = 60/min — well within DexScreener's limits.
+    const knownPaidAddrs = Array.from(state.keys()).filter((a) => {
+      const e = state.get(a);
+      return e && (e.boostAmount > 0 || e.hasProfile);
+    });
+    for (const addr of knownPaidAddrs) {
+      const pairs = await fetchDexPairsForToken(addr).catch(() => []);
+      const best = pairs
+        .filter((p) => p.baseToken?.address?.toLowerCase() === addr)
+        .sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0))[0];
+      if (!best) continue; // can't tell if status changed — leave entry alone
+      const active = best.boosts?.active ?? 0;
+      const hasProfile = !!best.info?.header;
+      const prev = state.get(addr);
+      if (!prev || !prev.bankr) continue;
+      state.set(addr, {
+        ...prev,
+        boostAmount: active,
+        totalBoostAmount: Math.max(prev.totalBoostAmount, active),
+        hasProfile: hasProfile || prev.hasProfile,
+        lastSeenAt: now,
+      });
+    }
+
+    // (3) Rotating discovery sweep every 60s — scan a slice of the
+    // 14-day launchCache to find newly-paid tokens. Full rotation takes
+    // ~80 min at 60 addresses per sweep with ~5000 entries, but truly
+    // new paid signals usually surface via the global feeds (faster).
     const tick = (globalThis.__bnkrScreenerPaidTickCount ?? 0) + 1;
     globalThis.__bnkrScreenerPaidTickCount = tick;
-    const knownBankrAddrs =
-      tick % SWEEP_EVERY_N_TICKS === 1 ? collectKnownBankrAddresses() : [];
-    if (knownBankrAddrs.length > 0) {
-      const pairs = await fetchDexPairs(knownBankrAddrs).catch(() => []);
-      // Per-token signals from the pair endpoint:
-      //   - boosts.active = currently active boost multiplier (authoritative)
-      //   - info.header / info.websites / info.socials = paid Enhanced Token
-      //     Info (profile claim) — much more reliable than relying on
-      //     /token-profiles/latest which only holds 30 most recent globally
-      type Sig = { boost: number; profile: boolean };
-      const sigByToken = new Map<string, Sig>();
-      for (const p of pairs) {
-        const baseAddr = p.baseToken?.address?.toLowerCase();
-        if (!baseAddr) continue;
-        const active = p.boosts?.active ?? 0;
-        const info = p.info;
-        const hasProfile =
-          !!info?.header ||
-          (info?.websites?.length ?? 0) > 0 ||
-          (info?.socials?.length ?? 0) > 0;
-        if (!active && !hasProfile) continue;
-        const prev = sigByToken.get(baseAddr) ?? { boost: 0, profile: false };
-        sigByToken.set(baseAddr, {
-          boost: Math.max(prev.boost, active),
-          profile: prev.profile || hasProfile,
-        });
-      }
-      for (const [addr, sig] of sigByToken) {
-        const prev = state.get(addr);
-        let bankr = prev?.bankr;
-        if (bankr === undefined) {
-          bankr = await fetchBankrLaunch(addr).catch(() => null);
+    if (tick % SWEEP_EVERY_N_TICKS === 1) {
+      const allKnown = collectKnownBankrAddresses();
+      if (allKnown.length > 0) {
+        const cursor =
+          (globalThis.__bnkrScreenerSweepCursor ?? 0) % allKnown.length;
+        const slice = [
+          ...allKnown.slice(cursor, cursor + ROTATION_BATCH),
+          ...(cursor + ROTATION_BATCH > allKnown.length
+            ? allKnown.slice(0, cursor + ROTATION_BATCH - allKnown.length)
+            : []),
+        ];
+        globalThis.__bnkrScreenerSweepCursor =
+          (cursor + ROTATION_BATCH) % allKnown.length;
+        const pairs = await fetchDexPairs(slice).catch(() => []);
+        // Profile signal: only info.header (paid banner image).
+        // Boost signal: boosts.active.
+        type Sig = { boost: number; profile: boolean };
+        const sigByToken = new Map<string, Sig>();
+        for (const p of pairs) {
+          const baseAddr = p.baseToken?.address?.toLowerCase();
+          if (!baseAddr) continue;
+          const active = p.boosts?.active ?? 0;
+          const hasProfile = !!p.info?.header;
+          if (!active && !hasProfile) continue;
+          const prev = sigByToken.get(baseAddr) ?? { boost: 0, profile: false };
+          sigByToken.set(baseAddr, {
+            boost: Math.max(prev.boost, active),
+            profile: prev.profile || hasProfile,
+          });
         }
-        if (!bankr) continue;
-        state.set(addr, {
-          address: addr,
-          boostAmount: sig.boost,
-          totalBoostAmount: Math.max(prev?.totalBoostAmount ?? 0, sig.boost),
-          hasProfile: sig.profile || prev?.hasProfile === true,
-          firstPaidAt: prev?.firstPaidAt ?? now,
-          lastSeenAt: now,
-          bankr,
-        });
-      }
-      // Decay: if an address was previously boosted but pair shows 0 now,
-      // keep the entry (so it stays surfaced) but set boostAmount=0 so the
-      // UI can decide to hide expired boosts. hasProfile / firstPaidAt stay.
-      const sweptSet = new Set(knownBankrAddrs);
-      for (const [addr, entry] of state) {
-        if (
-          entry.boostAmount > 0 &&
-          !sigByToken.has(addr) &&
-          sweptSet.has(addr)
-        ) {
-          state.set(addr, { ...entry, boostAmount: 0 });
+        for (const [addr, sig] of sigByToken) {
+          const prev = state.get(addr);
+          let bankr = prev?.bankr;
+          if (bankr === undefined) {
+            bankr = await fetchBankrLaunch(addr).catch(() => null);
+          }
+          if (!bankr) continue;
+          state.set(addr, {
+            address: addr,
+            boostAmount: sig.boost,
+            totalBoostAmount: Math.max(prev?.totalBoostAmount ?? 0, sig.boost),
+            hasProfile: sig.profile || prev?.hasProfile === true,
+            firstPaidAt: prev?.firstPaidAt ?? now,
+            lastSeenAt: now,
+            bankr,
+          });
         }
       }
     }
@@ -148,11 +171,21 @@ async function pollOnce() {
   }
 }
 
-/** Confirmed Bankr launches we've ever observed (positive launchCache entries). */
+/**
+ * Confirmed Bankr launches from the last 14 days. We don't sweep beyond
+ * that window because (a) the Paid DEX filter only shows last-14-day
+ * tokens anyway and (b) sweeping the full launchCache (often thousands
+ * of historical entries) hammers DexScreener and triggers rate limits.
+ */
+const SWEEP_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
 function collectKnownBankrAddresses(): string[] {
   const out: string[] = [];
+  const cutoff = Date.now() - SWEEP_WINDOW_MS;
   for (const [addr, entry] of __launchCacheForWatcher) {
-    if (entry.value) out.push(addr);
+    const launch = entry.value;
+    if (!launch) continue;
+    if (launch.timestamp < cutoff) continue;
+    out.push(addr);
   }
   return out;
 }

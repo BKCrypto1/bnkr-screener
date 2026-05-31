@@ -23,6 +23,21 @@ export class DiskBackedMap<V> extends Map<string, V> {
     } catch {
       // No file yet, or unreadable / corrupt — start empty.
     }
+    // Flush pending writes on process exit so debounced updates aren't lost
+    // when the dev server is killed mid-debounce.
+    const flush = () => this.flushNow();
+    process.on("beforeExit", flush);
+    process.on("SIGINT", flush);
+    process.on("SIGTERM", flush);
+  }
+
+  /** Force-flush any pending debounced write synchronously. */
+  flushNow() {
+    if (this.writeTimer) {
+      clearTimeout(this.writeTimer);
+      this.writeTimer = null;
+    }
+    this.flush();
   }
 
   override set(key: string, value: V): this {
