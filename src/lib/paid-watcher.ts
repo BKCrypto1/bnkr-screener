@@ -15,7 +15,7 @@ export type PaidEntry = {
   bankr?: BankrLaunch | null;
 };
 
-const PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
+const PRUNE_AFTER_MS = 14 * 24 * 60 * 60 * 1000;
 
 export function isPaidProfile(p: {
   info?: {
