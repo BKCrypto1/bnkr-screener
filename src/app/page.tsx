@@ -1,7 +1,7 @@
 import { getEnrichedLaunchesResult } from "@/lib/enrich";
 import { LaunchesTable } from "@/components/launches-table";
 
-export const revalidate = 3;
+export const revalidate = 10;
 
 export default async function Home() {
   const { launches, extraPaid } = await getEnrichedLaunchesResult();

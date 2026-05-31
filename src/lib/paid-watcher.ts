@@ -85,7 +85,8 @@ export async function pollOnce(): Promise<void> {
   }
 
   // Step 2: Check every token in the current Bankr top-50 individually.
-  // fetchDexPairsForToken avoids the 30-pair cap that batched calls suffer from.
+  // No hget — skip read, write only on paid signal. firstPaidAt resets on
+  // re-entry (acceptable); Step 3 corrects totalBoostAmount on next re-check.
   const launches = await fetchBankrLaunches().catch(() => []);
   for (const launch of launches) {
     const addr = launch.tokenAddress.toLowerCase();
@@ -95,25 +96,28 @@ export async function pollOnce(): Promise<void> {
     const active = best.boosts?.active ?? 0;
     const hasProfile = isPaidProfile(best);
     if (!active && !hasProfile) continue;
-    const prev = await redis.hget<PaidEntry>(K.paid, addr).catch(() => null);
     await redis
       .hset(K.paid, {
         [addr]: {
           address: addr,
           boostAmount: active,
-          totalBoostAmount: Math.max(prev?.totalBoostAmount ?? 0, active),
+          totalBoostAmount: active,
           hasProfile,
-          firstPaidAt: prev?.firstPaidAt ?? now,
+          firstPaidAt: now,
           lastSeenAt: now,
-          lastBoostedAt: active > 0 ? now : prev?.lastBoostedAt,
-          lastProfileAt: hasProfile ? now : prev?.lastProfileAt,
+          lastBoostedAt: active > 0 ? now : undefined,
+          lastProfileAt: hasProfile ? now : undefined,
           bankr: launch,
         } satisfies PaidEntry,
       })
       .catch(() => {});
   }
 
-  // Step 3: Re-check all currently known paid tokens.
+  // Step 3: Re-check all currently known paid tokens — runs every 5 minutes.
+  // Reduces hgetall + per-token hset ops from 1440/day to ~288/day.
+  const cronMinute = Math.floor(now / 60_000);
+  if (cronMinute % 5 !== 0) return;
+
   const allPaid =
     (await redis.hgetall<Record<string, PaidEntry>>(K.paid).catch(() => null)) ??
     {};
