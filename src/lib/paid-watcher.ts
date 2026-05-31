@@ -1,5 +1,5 @@
 import { fetchBankrLaunch, fetchBankrLaunches } from "./bankr";
-import { fetchDexPairsForToken, fetchPaidBaseSignals } from "./dexscreener";
+import { fetchDexPairs, fetchDexPairsForToken, fetchPaidBaseSignals } from "./dexscreener";
 import { K, redis } from "./redis";
 import type { BankrLaunch } from "./types";
 
@@ -82,14 +82,14 @@ export async function pollOnce(): Promise<PaidEntry[]> {
     if (!prev || isNewBoost || isNewProfile) newEntries.push(entry);
   }
 
-  // Step 2: Check every token in the current Bankr top-50 individually.
-  // No hget — skip read, write only on paid signal. firstPaidAt resets on
-  // re-entry (acceptable); Step 3 corrects totalBoostAmount on next re-check.
+  // Step 2: Check every token in the current Bankr top-50.
+  // Batch fetch — 2 DexScreener calls for 50 tokens, shares Vercel data cache
+  // with the main page render so often costs zero actual API calls.
   const launches = await fetchBankrLaunches().catch(() => []);
+  const top50Pairs = await fetchDexPairs(launches.map((l) => l.tokenAddress)).catch(() => []);
   for (const launch of launches) {
     const addr = launch.tokenAddress.toLowerCase();
-    const pairs = await fetchDexPairsForToken(addr).catch(() => []);
-    const best = bestPairFor(addr, pairs);
+    const best = bestPairFor(addr, top50Pairs);
     if (!best) continue;
     const active = best.boosts?.active ?? 0;
     const hasProfile = isPaidProfile(best);

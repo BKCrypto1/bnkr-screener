@@ -1,7 +1,7 @@
 import { fetchBankrLaunches, fetchDeployerLaunches } from "./bankr";
-import { fetchDexPairs, fetchDexPaidStatus, pickBestPair } from "./dexscreener";
+import { fetchDexPairs, pickBestPair } from "./dexscreener";
 import { getPaidBankrEntries } from "./paid-watcher";
-import type { BankrLaunch, DexPaidStatus, EnrichedLaunch } from "./types";
+import type { BankrLaunch, EnrichedLaunch } from "./types";
 
 export type EnrichedLaunchesResult = {
   launches: EnrichedLaunch[];
@@ -17,46 +17,24 @@ async function enrichLaunches(
     new Set(launches.map((l) => l.deployer.walletAddress.toLowerCase())),
   );
   const counts = new Map<string, number>();
-  const paid = new Map<string, DexPaidStatus>();
-  await Promise.all([
-    ...distinctDeployers.map(async (addr) => {
+  await Promise.all(
+    distinctDeployers.map(async (addr) => {
       try {
         const s = await fetchDeployerLaunches(addr);
         counts.set(addr, s.count);
       } catch {}
     }),
-    ...launches.map(async (l) => {
-      const s = await fetchDexPaidStatus(l.tokenAddress);
-      paid.set(l.tokenAddress.toLowerCase(), s);
-    }),
-  ]);
+  );
   return launches.map((l) => {
     const pair = pickBestPair(l.tokenAddress, pairs);
-    const orderStatus = paid.get(l.tokenAddress.toLowerCase());
-    // pair.boosts.active is the authoritative "currently boosted" signal —
-    // /orders/v1/base/{addr} is lagged/empty for many active boosts.
     const pairBoost = pair?.boosts?.active ?? 0;
-    const merged = orderStatus
-      ? {
-          ...orderStatus,
-          boosted: orderStatus.boosted || pairBoost > 0,
-          boostAmount: Math.max(orderStatus.boostAmount, pairBoost),
-          totalBoostAmount: Math.max(orderStatus.totalBoostAmount, pairBoost),
-        }
-      : pairBoost > 0
-      ? {
-          boosted: true,
-          boostAmount: pairBoost,
-          totalBoostAmount: pairBoost,
-          hasProfile: false,
-          orderTypes: [],
-        }
-      : undefined;
     return {
       ...l,
       pair,
       deployerLaunchCount: counts.get(l.deployer.walletAddress.toLowerCase()),
-      dexPaid: merged,
+      dexPaid: pairBoost > 0
+        ? { boosted: true, boostAmount: pairBoost, totalBoostAmount: pairBoost, hasProfile: false, orderTypes: [] }
+        : undefined,
     };
   });
 }
