@@ -4,6 +4,7 @@ import {
   fetchBankrLaunches,
   getRecentLaunchAddresses,
   pruneOldLaunches,
+  writeLaunchesToRedis,
 } from "./bankr";
 import {
   fetchDexPairs,
@@ -50,6 +51,11 @@ export function isPaidProfile(p: {
  */
 export async function pollOnce(): Promise<void> {
   const now = Date.now();
+
+  // Fetch latest launches and write to the ZSET index. Page renders no longer
+  // write to Redis (read-only), so the cron is the sole writer of this index.
+  const latestLaunches = await fetchBankrLaunches().catch(() => []);
+  await writeLaunchesToRedis(latestLaunches).catch(() => {});
 
   // (1) Global feeds — discovers new paid addresses before they enter our set.
   const signals = await fetchPaidBaseSignals().catch(() => []);
@@ -176,7 +182,7 @@ export async function getPaidBankrEntries(): Promise<
   Array<PaidEntry & { bankr: BankrLaunch }>
 > {
   const all =
-    (await redis.hgetall<Record<string, PaidEntry>>(K.paid)) ?? {};
+    (await redis.hgetall<Record<string, PaidEntry>>(K.paid).catch(() => null)) ?? {};
   const out: Array<PaidEntry & { bankr: BankrLaunch }> = [];
   for (const entry of Object.values(all)) {
     if (entry.bankr) out.push(entry as PaidEntry & { bankr: BankrLaunch });

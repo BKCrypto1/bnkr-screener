@@ -36,7 +36,7 @@ function shouldCacheLaunch(launch: BankrLaunch): boolean {
   return launch.timestamp >= Date.now() - LAUNCH_RETENTION_MS;
 }
 
-async function writeLaunchesToRedis(launches: BankrLaunch[]) {
+export async function writeLaunchesToRedis(launches: BankrLaunch[]) {
   const toWrite = launches.filter(shouldCacheLaunch);
   if (toWrite.length === 0) return;
   const pipeline = redis.pipeline();
@@ -62,7 +62,6 @@ export async function fetchBankrLaunches(): Promise<BankrLaunch[]> {
     const json = (await res.json()) as { launches: BankrLaunch[] };
     const value = json.launches ?? [];
     launchesCache = { value, expiresAt: now + LAUNCHES_TTL_MS };
-    void writeLaunchesToRedis(value);
     return value;
   } catch (err) {
     if (launchesCache) return launchesCache.value;
@@ -74,7 +73,7 @@ export async function fetchBankrLaunch(
   address: string,
 ): Promise<BankrLaunch | null> {
   const key = address.toLowerCase();
-  const hit = await redis.get<{ data: BankrLaunch | null }>(K.launch(key));
+  const hit = await redis.get<{ data: BankrLaunch | null }>(K.launch(key)).catch(() => null);
   if (hit !== null && hit !== undefined) return hit.data;
 
   const res = await bankrFetch(`${BANKR_LAUNCHES_URL}/${key}`, {
@@ -104,7 +103,7 @@ export async function fetchDeployerLaunches(
   deployerAddress: string,
 ): Promise<DeployerSummary> {
   const key = deployerAddress.toLowerCase();
-  const hit = await redis.get<DeployerSummary>(K.deployer(key));
+  const hit = await redis.get<DeployerSummary>(K.deployer(key)).catch(() => null);
   if (hit) return hit;
 
   let cursor = "";
@@ -133,7 +132,6 @@ export async function fetchDeployerLaunches(
     if (recent.length < 12) {
       recent.push(...results.slice(0, 12 - recent.length));
     }
-    void writeLaunchesToRedis(results);
     pages += 1;
     if (!json.nextCursor || results.length === 0) break;
     if (pages >= MAX_PAGES) {
