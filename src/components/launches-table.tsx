@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { EnrichedLaunch } from "@/lib/types";
 import { fmtAge, fmtPct, fmtPrice, fmtUsd, ipfsToHttp } from "@/lib/format";
 import {
@@ -73,9 +73,24 @@ export function LaunchesTable({
   const [refreshing, setRefreshing] = useState(false);
   const [, tick] = useState(0);
 
+  type PaidNotif = { id: number; launch: EnrichedLaunch; kind: "boost" | "profile" | "both" };
+  const [notifications, setNotifications] = useState<PaidNotif[]>([]);
+  const seenPaidRef = useRef<Set<string> | null>(null);
+  const notifIdRef = useRef(0);
+
   useEffect(() => {
     const id = setInterval(() => tick((n) => n + 1), 1000);
     return () => clearInterval(id);
+  }, []);
+
+  // Seed seen set from initial data — no notifications on first load
+  useEffect(() => {
+    seenPaidRef.current = new Set(
+      [...initial, ...(initialExtraPaid ?? [])]
+        .filter((l) => l.dexPaid?.boosted || l.dexPaid?.hasProfile)
+        .map((l) => l.tokenAddress.toLowerCase()),
+    );
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -94,6 +109,21 @@ export function LaunchesTable({
           setData(json.launches);
           setExtraPaid(json.extraPaid ?? []);
           setLastUpdated(json.fetchedAt);
+          // Detect newly paid tokens
+          if (seenPaidRef.current !== null) {
+            const toNotify: PaidNotif[] = [];
+            for (const l of [...json.launches, ...(json.extraPaid ?? [])]) {
+              const addr = l.tokenAddress.toLowerCase();
+              if ((l.dexPaid?.boosted || l.dexPaid?.hasProfile) && !seenPaidRef.current.has(addr)) {
+                seenPaidRef.current.add(addr);
+                const kind = l.dexPaid?.boosted && l.dexPaid?.hasProfile ? "both"
+                  : l.dexPaid?.boosted ? "boost" : "profile";
+                toNotify.push({ id: ++notifIdRef.current, launch: l, kind });
+              }
+            }
+            if (toNotify.length > 0)
+              setNotifications((prev) => [...toNotify, ...prev].slice(0, 5));
+          }
         }
       } catch {
       } finally {
@@ -103,6 +133,16 @@ export function LaunchesTable({
     const id = setInterval(refresh, 3_000);
     return () => { cancelled = true; clearInterval(id); };
   }, []);
+
+  // Auto-dismiss oldest notification every 8s
+  useEffect(() => {
+    if (notifications.length === 0) return;
+    const id = setTimeout(
+      () => setNotifications((prev) => prev.slice(0, prev.length - 1)),
+      8000,
+    );
+    return () => clearTimeout(id);
+  }, [notifications.length]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -299,6 +339,46 @@ export function LaunchesTable({
             </table>
           </div>
         </>
+      )}
+
+      {/* Paid DEX notification toasts — bottom right */}
+      {notifications.length > 0 && (
+        <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 items-end">
+          {notifications.map((n) => {
+            const img = ipfsToHttp(n.launch.imageUri);
+            return (
+              <Link
+                key={n.id}
+                href={`/token/${n.launch.tokenAddress}`}
+                onClick={() => setNotifications((prev) => prev.filter((x) => x.id !== n.id))}
+                className="flex items-center gap-3 bg-zinc-900 border border-zinc-700 rounded-lg px-4 py-3 shadow-lg hover:border-zinc-500 transition-colors max-w-xs w-full"
+              >
+                {img ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={img} alt="" className="h-8 w-8 rounded-full object-cover flex-shrink-0" />
+                ) : (
+                  <div className="h-8 w-8 rounded-full bg-zinc-700 flex-shrink-0 flex items-center justify-center text-[10px] text-zinc-400">
+                    {n.launch.tokenSymbol.slice(0, 2).toUpperCase()}
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium text-sm truncate">{n.launch.tokenName}</div>
+                  <div className="text-xs text-zinc-400">
+                    {n.kind === "boost" && `⚡ Boosted ${n.launch.dexPaid?.boostAmount}x`}
+                    {n.kind === "profile" && "💎 Paid DexScreener profile"}
+                    {n.kind === "both" && `⚡💎 Boosted + profile`}
+                  </div>
+                </div>
+                <button
+                  onClick={(e) => { e.preventDefault(); setNotifications((prev) => prev.filter((x) => x.id !== n.id)); }}
+                  className="text-zinc-600 hover:text-zinc-300 flex-shrink-0 text-lg leading-none"
+                >
+                  ×
+                </button>
+              </Link>
+            );
+          })}
+        </div>
       )}
 
       {view === "history" && (
