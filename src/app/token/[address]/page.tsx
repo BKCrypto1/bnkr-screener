@@ -104,6 +104,9 @@ export default async function TokenPage({
             {paidEntry?.firstPaidAt && (
               <> · first paid <span suppressHydrationWarning>{fmtAge(paidEntry.firstPaidAt)}</span> ago</>
             )}
+            {paidEntry && paidEntry.totalBoostAmount > 0 && (
+              <> · boosted {paidEntry.totalBoostAmount}x (~${estimateBoostSpend(paidEntry.totalBoostAmount)})</>
+            )}
           </p>
           <div className="mt-2 flex flex-wrap gap-3 text-xs text-zinc-400">
             {launch.tweetUrl && (
