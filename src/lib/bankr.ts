@@ -42,11 +42,14 @@ export async function fetchBankrLaunches(): Promise<BankrLaunch[]> {
     launchesCache = { value, expiresAt: now + LAUNCHES_TTL_MS };
     // Populate the per-token launchCache from the feed so the paid watcher
     // can classify boosted addresses without a separate Bankr lookup.
-    const ts = now + LAUNCH_TTL_MS;
+    // (Live feed entries are always within minutes so the retention check is
+    // effectively a no-op here, but keep it for symmetry.)
+    const launchExpiresAt = now + LAUNCH_TTL_MS;
     for (const launch of value) {
+      if (!shouldCacheLaunch(launch)) continue;
       launchCache.set(launch.tokenAddress.toLowerCase(), {
         value: launch,
-        expiresAt: ts,
+        expiresAt: launchExpiresAt,
       });
     }
     return value;
@@ -95,15 +98,22 @@ export async function backfillDeployerHistory(
     const results = json.results ?? [];
     count += results.length;
     const launchExpiresAt = now + LAUNCH_TTL_MS;
+    let writtenInPage = 0;
     for (const launch of results) {
+      if (!shouldCacheLaunch(launch)) continue;
       launchCache.set(launch.tokenAddress.toLowerCase(), {
         value: launch,
         expiresAt: launchExpiresAt,
       });
+      writtenInPage += 1;
     }
     pages += 1;
     if (!json.nextCursor || results.length === 0) break;
     if (pages >= MAX_PAGES) break;
+    // Optimization: results come back in reverse-chronological order from
+    // Bankr. If the entire page was older than the retention window, every
+    // subsequent page will be too — stop paginating.
+    if (results.length > 0 && writtenInPage === 0) break;
     cursor = json.nextCursor;
   }
   return count;
@@ -145,11 +155,12 @@ export async function fetchDeployerLaunches(
     if (recent.length < 12) {
       recent.push(...results.slice(0, 12 - recent.length));
     }
-    // Backfill launchCache with every launch we see during pagination, so
-    // the paid watcher's pair-boost sweep covers the deployer's entire
-    // history — not just the 50 most recent.
+    // Backfill launchCache with launches inside the retention window only —
+    // older launches don't help the Paid DEX filter / watcher sweep and just
+    // bloat disk.
     const launchExpiresAt = now + LAUNCH_TTL_MS;
     for (const launch of results) {
+      if (!shouldCacheLaunch(launch)) continue;
       launchCache.set(launch.tokenAddress.toLowerCase(), {
         value: launch,
         expiresAt: launchExpiresAt,
@@ -181,6 +192,38 @@ export const __launchCacheForWatcher = launchCache;
 // persistence means a successful lookup survives both restarts and Bankr blocks.
 const LAUNCH_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const LAUNCH_NEG_TTL_MS = 60 * 60 * 1000; // 1 hour — not Bankr launches stay not-Bankr
+
+// Retention window: only keep launches younger than this. Everything in our
+// Paid DEX filter and watcher sweeps operates on the last 14 days, so older
+// entries are dead weight — they bloat disk and slow startup. Lookups for
+// pruned addresses still work; fetchBankrLaunch will re-fetch on demand.
+const LAUNCH_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
+
+export function pruneOldLaunches(): number {
+  const cutoff = Date.now() - LAUNCH_RETENTION_MS;
+  let removed = 0;
+  for (const [addr, entry] of Array.from(launchCache.entries())) {
+    const ts = entry.value?.timestamp;
+    if (ts !== undefined && ts < cutoff) {
+      launchCache.delete(addr);
+      removed += 1;
+    }
+  }
+  return removed;
+}
+
+// Prune on module load (once per process start)
+{
+  const removed = pruneOldLaunches();
+  if (removed > 0) {
+    console.log(`[bankr] pruned ${removed} launchCache entries older than 14d`);
+  }
+}
+
+/** Test the timestamp against the retention window. */
+function shouldCacheLaunch(launch: BankrLaunch): boolean {
+  return launch.timestamp >= Date.now() - LAUNCH_RETENTION_MS;
+}
 
 export async function fetchBankrLaunch(
   address: string,

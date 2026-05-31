@@ -3,6 +3,7 @@ import {
   backfillDeployerHistory,
   fetchBankrLaunch,
   fetchBankrLaunches,
+  pruneOldLaunches,
 } from "./bankr";
 import { getOrCreateDiskMap } from "./disk-cache";
 import {
@@ -164,10 +165,23 @@ async function pollOnce() {
       for (const a of batch) checked.add(a);
     }
 
-    // Prune entries we haven't observed in 7 days to keep file size bounded.
+    // Prune watcher entries we haven't observed in 7 days
     const PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
     for (const [k, v] of Array.from(state.entries())) {
       if (now - v.lastSeenAt > PRUNE_AFTER_MS) state.delete(k);
+    }
+
+    // Prune launchCache entries that have aged past the 14d retention
+    // window. Cheap iteration; usually a no-op except for entries that
+    // just crossed the boundary since the last poll.
+    const prunedLaunches = pruneOldLaunches();
+    if (prunedLaunches > 0) {
+      // also drop them from the "checked" set so the Set doesn't bloat
+      const cs = getCheckedSet();
+      const stillKnown = new Set(__launchCacheForWatcher.keys());
+      for (const a of Array.from(cs)) {
+        if (!stillKnown.has(a)) cs.delete(a);
+      }
     }
   } catch (err) {
     console.error("[paid-watcher] poll failed:", err);
