@@ -129,22 +129,21 @@ export async function pollOnce(): Promise<PaidEntry[]> {
     const pairs = await fetchDexPairsForToken(addr).catch(() => []);
     const best = bestPairFor(addr, pairs);
     if (!best) continue;
-    await redis
-      .hset(K.paid, {
-        [addr]: {
-          ...entry,
-          boostAmount: best.boosts?.active ?? 0,
-          totalBoostAmount: Math.max(
-            entry.totalBoostAmount,
-            best.boosts?.active ?? 0,
-          ),
-          hasProfile: isPaidProfile(best),
-          lastSeenAt: now,
-          lastBoostedAt: (best.boosts?.active ?? 0) > 0 ? now : entry.lastBoostedAt,
-          lastProfileAt: isPaidProfile(best) ? now : entry.lastProfileAt,
-        } satisfies PaidEntry,
-      })
-      .catch(() => {});
+    const newBoost = best.boosts?.active ?? 0;
+    const newProfile = isPaidProfile(best);
+    const isNewBoost = entry.boostAmount === 0 && newBoost > 0;
+    const isNewProfile = !entry.hasProfile && newProfile;
+    const updated: PaidEntry = {
+      ...entry,
+      boostAmount: newBoost,
+      totalBoostAmount: Math.max(entry.totalBoostAmount, newBoost),
+      hasProfile: newProfile,
+      lastSeenAt: now,
+      lastBoostedAt: newBoost > 0 ? now : entry.lastBoostedAt,
+      lastProfileAt: newProfile ? now : entry.lastProfileAt,
+    };
+    await redis.hset(K.paid, { [addr]: updated }).catch(() => {});
+    if (isNewBoost || isNewProfile) newEntries.push(updated);
   }
   if (toDelete.length > 0) {
     await redis
