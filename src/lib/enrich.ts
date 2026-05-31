@@ -70,7 +70,7 @@ export async function getEnrichedLaunchesResult(): Promise<EnrichedLaunchesResul
   // classifies Base addresses against the disk-persisted launchCache without
   // hammering Bankr. We just read its current state here — zero external
   // calls in this request path.
-  const paidEntries = getPaidBankrEntries();
+  const paidEntries = await getPaidBankrEntries();
   const paidByAddr = new Map(paidEntries.map((e) => [e.address, e]));
 
   // Overlay paid data + firstPaidAt onto launches that appear in both feeds.
