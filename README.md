@@ -89,9 +89,12 @@ Edits to non-watcher files (`enrich.ts`, components, etc.) hot-reload normally.
 │  │   ↳ bankrLimit(2) caps parallel Bankr calls          │  │
 │  │                                                      │  │
 │  │ • paid-watcher.ts: setInterval(10s)                  │  │
-│  │   ↳ polls DexScreener boost/profile feeds            │  │
-│  │   ↳ every 60s, sweeps all known Bankr launches via   │  │
-│  │     pair.boosts.active (authoritative source)        │  │
+│  │   ↳ polls DexScreener latest boost/profile feeds     │  │
+│  │     (new payments globally surface in seconds)       │  │
+│  │   ↳ per-token re-check of known-paid addresses       │  │
+│  │     (detects boost expiry / profile upgrades)        │  │
+│  │   ↳ one-shot pair check for each newly-added         │  │
+│  │     launchCache entry, then trusted                  │  │
 │  │   ↳ disk-persisted state with firstPaidAt timestamps │  │
 │  └──────────────────────────────────────────────────────┘  │
 └────────────────────────────────────────────────────────────┘
