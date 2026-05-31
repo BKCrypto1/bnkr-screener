@@ -13,7 +13,7 @@ A live screener for tokens launched via [Bankr](https://bankr.bot) on Base — l
 - **👑 lifetime launch count** next to each deployer (colored — zinc 2–5, amber 6–20, rose 21+)
 - **⚡ Nx boost** badge when a token has a currently-active DexScreener boost
 - **💎 profile** badge when a team paid for DexScreener's Enhanced Token Info
-- **Filters**: "Traded only" (hides untraded spam), "Paid DEX" (only boosted/profiled tokens)
+- **Filters**: "Traded only" (hides untraded spam), "Paid DEX" (only currently-boosted or paid-profile tokens, last 14 days)
 - **Cross-launch grouping**: if the same deployer launches the same token name 3+ times, collapses to one row with `3× attempts` badge
 - **Live indicator**: subtle dot pulses on each 3s poll; new paid tokens flash cyan when first detected
 - Auto-refreshes every 3s
@@ -128,7 +128,7 @@ For sub-minute detection latency in production, run the watcher on a separate al
 
 - **Bankr API endpoints are undocumented** — `/token-launches*` is an internal frontend endpoint, not a public API. Cloudflare aggressively blocks unauthenticated bursts. Getting a Bankr API key (`X-API-Key`, sign up at [bankr.bot/api](https://bankr.bot/api)) would put us in the authenticated rate-limit tier; not yet wired.
 - **GeckoTerminal has ~30–60s indexing lag** on Doppler / Uniswap V4 pools, sometimes longer. For the chart it's acceptable; for sub-second trade tracking you'd want your own indexer.
-- **DexScreener boost detection** is best-effort — their global `/token-boosts/latest/v1` only holds the most recent 30 globally, so we backfill by sweeping all known Bankr launches' pairs every 60s for `boosts.active > 0`. New launches discovered via the live feed enter the sweep set on next backfill.
+- **DexScreener paid detection** combines three signals: the global `/token-boosts/latest/v1` and `/token-profiles/latest/v1` feeds (catch all new payments globally within ~10s), per-token pair sweeps for already-known paid tokens (refresh status every 10s), and a one-shot pair check when a new launch enters `launchCache` (then trusts the result). No perpetual rotation — each address is checked once unless it becomes paid, then it re-checks continuously.
 - **No DB** — all state is in-memory + `/tmp/` JSON. Sufficient for the current scale (thousands of tokens), but doesn't share across Vercel function instances.
 
 ## Roadmap

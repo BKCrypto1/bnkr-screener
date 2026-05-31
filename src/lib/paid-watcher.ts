@@ -13,10 +13,13 @@ import {
 import type { BankrLaunch } from "./types";
 
 const POLL_INTERVAL_MS = 10_000;
-// Discovery (rotating) sweep cadence — every N ticks.
-const SWEEP_EVERY_N_TICKS = 6; // → every 60s
-// How many addresses to scan per rotation cycle. ~2 batched DexScreener calls.
-const ROTATION_BATCH = 60;
+// Each address in the 14-day launchCache is checked exactly once. After
+// that we rely on (a) the global boost/profile feeds for new payments and
+// (b) the per-known-paid sweep for expiry/upgrade detection. New launches
+// entering launchCache from the live feed get checked on the next poll.
+// MAX_DRAIN caps how many unchecked addresses we process per 10s tick so
+// the initial cold-start drain doesn't burst DexScreener.
+const MAX_DRAIN_PER_TICK = 200;
 const CACHE_PATH = "/tmp/bankr-screener/paid-watcher.json";
 const GLOBAL_KEY = "__bnkrScreenerPaidState";
 
@@ -41,9 +44,19 @@ declare global {
   // eslint-disable-next-line no-var
   var __bnkrScreenerPaidRunning: boolean | undefined;
   // eslint-disable-next-line no-var
-  var __bnkrScreenerPaidTickCount: number | undefined;
-  // eslint-disable-next-line no-var
-  var __bnkrScreenerSweepCursor: number | undefined;
+  var __bnkrScreenerCheckedAddrs: Set<string> | undefined;
+}
+
+/**
+ * Addresses we've already pair-checked since the process started. Not
+ * persisted — on restart we re-check, which acts as a self-heal sweep
+ * for payments made while the process was down.
+ */
+function getCheckedSet(): Set<string> {
+  if (!globalThis.__bnkrScreenerCheckedAddrs) {
+    globalThis.__bnkrScreenerCheckedAddrs = new Set<string>();
+  }
+  return globalThis.__bnkrScreenerCheckedAddrs;
 }
 
 async function pollOnce() {
@@ -103,60 +116,52 @@ async function pollOnce() {
       });
     }
 
-    // (3) Rotating discovery sweep every 60s — scan a slice of the
-    // 14-day launchCache to find newly-paid tokens. Full rotation takes
-    // ~80 min at 60 addresses per sweep with ~5000 entries, but truly
-    // new paid signals usually surface via the global feeds (faster).
-    const tick = (globalThis.__bnkrScreenerPaidTickCount ?? 0) + 1;
-    globalThis.__bnkrScreenerPaidTickCount = tick;
-    if (tick % SWEEP_EVERY_N_TICKS === 1) {
-      const allKnown = collectKnownBankrAddresses();
-      if (allKnown.length > 0) {
-        const cursor =
-          (globalThis.__bnkrScreenerSweepCursor ?? 0) % allKnown.length;
-        const slice = [
-          ...allKnown.slice(cursor, cursor + ROTATION_BATCH),
-          ...(cursor + ROTATION_BATCH > allKnown.length
-            ? allKnown.slice(0, cursor + ROTATION_BATCH - allKnown.length)
-            : []),
-        ];
-        globalThis.__bnkrScreenerSweepCursor =
-          (cursor + ROTATION_BATCH) % allKnown.length;
-        const pairs = await fetchDexPairs(slice).catch(() => []);
-        // Profile signal: only info.header (paid banner image).
-        // Boost signal: boosts.active.
-        type Sig = { boost: number; profile: boolean };
-        const sigByToken = new Map<string, Sig>();
-        for (const p of pairs) {
-          const baseAddr = p.baseToken?.address?.toLowerCase();
-          if (!baseAddr) continue;
-          const active = p.boosts?.active ?? 0;
-          const hasProfile = !!p.info?.header;
-          if (!active && !hasProfile) continue;
-          const prev = sigByToken.get(baseAddr) ?? { boost: 0, profile: false };
-          sigByToken.set(baseAddr, {
-            boost: Math.max(prev.boost, active),
-            profile: prev.profile || hasProfile,
-          });
-        }
-        for (const [addr, sig] of sigByToken) {
-          const prev = state.get(addr);
-          let bankr = prev?.bankr;
-          if (bankr === undefined) {
-            bankr = await fetchBankrLaunch(addr).catch(() => null);
-          }
-          if (!bankr) continue;
-          state.set(addr, {
-            address: addr,
-            boostAmount: sig.boost,
-            totalBoostAmount: Math.max(prev?.totalBoostAmount ?? 0, sig.boost),
-            hasProfile: sig.profile || prev?.hasProfile === true,
-            firstPaidAt: prev?.firstPaidAt ?? now,
-            lastSeenAt: now,
-            bankr,
-          });
-        }
+    // (3) Drain unchecked addresses: find any 14-day launchCache entries
+    // we haven't pair-checked yet (since process start) and check them
+    // once. New launches entering launchCache via the live /token-launches
+    // feed get caught here on the next 10s tick. After the initial
+    // drain completes, this becomes ~0 work per tick (only new launches).
+    const checked = getCheckedSet();
+    const allKnown = collectKnownBankrAddresses();
+    const unchecked = allKnown.filter((a) => !checked.has(a));
+    if (unchecked.length > 0) {
+      const batch = unchecked.slice(0, MAX_DRAIN_PER_TICK);
+      const pairs = await fetchDexPairs(batch).catch(() => []);
+      type Sig = { boost: number; profile: boolean };
+      const sigByToken = new Map<string, Sig>();
+      for (const p of pairs) {
+        const baseAddr = p.baseToken?.address?.toLowerCase();
+        if (!baseAddr) continue;
+        const active = p.boosts?.active ?? 0;
+        const hasProfile = !!p.info?.header;
+        if (!active && !hasProfile) continue;
+        const prev = sigByToken.get(baseAddr) ?? { boost: 0, profile: false };
+        sigByToken.set(baseAddr, {
+          boost: Math.max(prev.boost, active),
+          profile: prev.profile || hasProfile,
+        });
       }
+      for (const [addr, sig] of sigByToken) {
+        const prev = state.get(addr);
+        let bankr = prev?.bankr;
+        if (bankr === undefined) {
+          bankr = await fetchBankrLaunch(addr).catch(() => null);
+        }
+        if (!bankr) continue;
+        state.set(addr, {
+          address: addr,
+          boostAmount: sig.boost,
+          totalBoostAmount: Math.max(prev?.totalBoostAmount ?? 0, sig.boost),
+          hasProfile: sig.profile || prev?.hasProfile === true,
+          firstPaidAt: prev?.firstPaidAt ?? now,
+          lastSeenAt: now,
+          bankr,
+        });
+      }
+      // Mark all batch addresses as checked — we don't re-check unchecked
+      // addresses with no signal; we trust them until they appear in a
+      // global feed (boost/profile freshly paid) or get manually visited.
+      for (const a of batch) checked.add(a);
     }
 
     // Prune entries we haven't observed in 7 days to keep file size bounded.
