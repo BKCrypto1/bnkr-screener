@@ -14,6 +14,7 @@ import {
   estimateBoostSpend,
 } from "@/lib/dex-boost";
 import { fetchTopPoolForToken } from "@/lib/geckoterminal";
+import { CopyButton } from "@/components/copy-button";
 import { PriceChart } from "@/components/price-chart";
 import { TradesTable } from "@/components/trades-table";
 import {
@@ -206,7 +207,7 @@ export default async function TokenPage({
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-        <KV label="Token address" value={launch.tokenAddress} mono />
+        <KV label="Token address" value={launch.tokenAddress} mono copyValue={launch.tokenAddress} />
         <KV
           label="Deployer"
           value={
@@ -282,6 +283,7 @@ function KV({
   href,
   extra,
   extraHref,
+  copyValue,
 }: {
   label: string;
   value: string;
@@ -289,16 +291,20 @@ function KV({
   href?: string;
   extra?: string;
   extraHref?: string;
+  copyValue?: string;
 }) {
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-950 px-4 py-3">
       <div className="text-xs uppercase tracking-wide text-zinc-500">{label}</div>
-      <div className={`mt-1 break-all ${mono ? "font-mono text-xs" : ""}`}>
-        {href ? (
-          <a href={href} target="_blank" rel="noopener noreferrer" className="hover:text-zinc-100 underline underline-offset-2">
-            {value}
-          </a>
-        ) : value}
+      <div className={`mt-1 flex items-center gap-2 ${mono ? "font-mono text-xs" : ""}`}>
+        <span className="break-all">
+          {href ? (
+            <a href={href} target="_blank" rel="noopener noreferrer" className="hover:text-zinc-100 underline underline-offset-2">
+              {value}
+            </a>
+          ) : value}
+        </span>
+        {copyValue && <CopyButton value={copyValue} />}
       </div>
       {extra && (
         <div className="mt-1 text-xs text-amber-400/80">
