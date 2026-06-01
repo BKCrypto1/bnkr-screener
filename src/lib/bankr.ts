@@ -30,6 +30,11 @@ const LAUNCH_NEG_TTL_SEC = 15 * 60; // 15min — balances retry freshness vs Red
 const DEPLOYER_TTL_SEC = 60 * 60;
 const MAX_PAGES = 20;
 
+// In-process cache for deployer summaries — avoids a Redis GET on every render
+// for the same deployer. TTL is short enough that counts stay roughly current.
+const deployerMemCache = new Map<string, { value: DeployerSummary; expiresAt: number }>();
+const DEPLOYER_MEM_TTL_MS = 5 * 60_000;
+
 export async function fetchBankrLaunches(): Promise<BankrLaunch[]> {
   const now = Date.now();
   if (launchesCache && launchesCache.expiresAt > now) return launchesCache.value;
@@ -90,10 +95,15 @@ export async function fetchDeployerLaunches(
   deployerAddress: string,
 ): Promise<DeployerSummary> {
   const key = deployerAddress.toLowerCase();
-  const hit = await redis
-    .get<DeployerSummary>(K.deployer(key))
-    .catch(() => null);
-  if (hit) return hit;
+  const now = Date.now();
+  const memHit = deployerMemCache.get(key);
+  if (memHit && memHit.expiresAt > now) return memHit.value;
+
+  const hit = await redis.get<DeployerSummary>(K.deployer(key)).catch(() => null);
+  if (hit) {
+    deployerMemCache.set(key, { value: hit, expiresAt: now + DEPLOYER_MEM_TTL_MS });
+    return hit;
+  }
 
   let cursor = "";
   let count = 0;
@@ -131,8 +141,7 @@ export async function fetchDeployerLaunches(
   }
 
   const summary: DeployerSummary = { count, recent, truncated };
-  await redis
-    .set(K.deployer(key), summary, { ex: DEPLOYER_TTL_SEC })
-    .catch(() => {});
+  deployerMemCache.set(key, { value: summary, expiresAt: Date.now() + DEPLOYER_MEM_TTL_MS });
+  await redis.set(K.deployer(key), summary, { ex: DEPLOYER_TTL_SEC }).catch(() => {});
   return summary;
 }

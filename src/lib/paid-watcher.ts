@@ -19,6 +19,10 @@ export type PaidEntry = {
 
 const PRUNE_AFTER_MS = 14 * 24 * 60 * 60 * 1000;
 
+// In-process cache for K.paid entries — prevents a hgetall on every render.
+let paidEntriesCache: { value: Array<PaidEntry & { bankr: BankrLaunch }>; expiresAt: number } | null = null;
+const PAID_ENTRIES_MEM_TTL_MS = 15_000;
+
 export function isPaidProfile(p: {
   info?: {
     header?: string;
@@ -170,13 +174,15 @@ export async function pollOnce(): Promise<PaidEntry[]> {
 export async function getPaidBankrEntries(): Promise<
   Array<PaidEntry & { bankr: BankrLaunch }>
 > {
+  const now = Date.now();
+  if (paidEntriesCache && paidEntriesCache.expiresAt > now) return paidEntriesCache.value;
+
   const all =
-    (await redis
-      .hgetall<Record<string, PaidEntry>>(K.paid)
-      .catch(() => null)) ?? {};
+    (await redis.hgetall<Record<string, PaidEntry>>(K.paid).catch(() => null)) ?? {};
   const out: Array<PaidEntry & { bankr: BankrLaunch }> = [];
   for (const entry of Object.values(all)) {
     if (entry.bankr) out.push(entry as PaidEntry & { bankr: BankrLaunch });
   }
+  paidEntriesCache = { value: out, expiresAt: now + PAID_ENTRIES_MEM_TTL_MS };
   return out;
 }
