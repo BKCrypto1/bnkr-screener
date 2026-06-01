@@ -56,6 +56,18 @@ export async function GET(request: NextRequest) {
     ]);
     const notified = await notify(newEntries);
 
+    if (newEntries.length > 0) {
+      console.log(`[poll-paid] detected=${newEntries.length} notified=${notified}`, newEntries.map((e) => ({
+        addr: e.address,
+        name: e.bankr?.tokenName ?? "?",
+        boost: e.boostAmount,
+        profile: e.hasProfile,
+      })));
+    }
+    if (newEntries.length > notified) {
+      console.warn(`[poll-paid] ntfy failed for ${newEntries.length - notified} entries`);
+    }
+
     // Track launch rate — compare top-50 against last-seen timestamp
     if (launches.length > 0) {
       const lastTs = await redis.get<number>(K.lastLaunchTs).catch(() => null) ?? 0;

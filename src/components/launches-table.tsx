@@ -110,11 +110,17 @@ export function LaunchesTable({
     return () => clearInterval(id);
   }, []);
 
-  // Seed seen set from initial data — no notifications on first load
+  // Seed seen set from initial SSR data, but exclude tokens that are still
+  // within the 60s flash window — those were just detected and should notify
+  // even if the user loaded the page after the cron wrote them.
   useEffect(() => {
+    const cutoff = Date.now() - 60_000;
     seenPaidRef.current = new Set(
       [...initial, ...(initialExtraPaid ?? [])]
-        .filter((l) => l.dexPaid?.boosted || l.dexPaid?.hasProfile)
+        .filter((l) =>
+          (l.dexPaid?.boosted || l.dexPaid?.hasProfile) &&
+          (!l.firstPaidAt || l.firstPaidAt < cutoff),
+        )
         .map((l) => l.tokenAddress.toLowerCase()),
     );
   // eslint-disable-next-line react-hooks/exhaustive-deps
