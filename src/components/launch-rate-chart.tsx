@@ -8,24 +8,56 @@ export type RateBucket = {
   isCurrent: boolean;
 };
 
-export function LaunchRateChart({ buckets }: { buckets: RateBucket[] }) {
+export function LaunchRateChart({
+  buckets,
+  resolution = "15m",
+}: {
+  buckets: RateBucket[];
+  resolution?: "15m" | "1h";
+}) {
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const max = Math.max(...buckets.map((b) => b.count), 1);
   const CHART_H = 120;
   const LABEL_H = 24;
-  const labelEvery = 16;
+  // For 7d/1h resolution we have 168 bars — label every ~24 = once per day
+  const labelEvery = resolution === "1h" ? 24 : 16;
 
-  function fmtBucketTime(ts: number) {
+  function fmtTime(ts: number) {
     const d = new Date(ts);
     const h = d.getHours();
-    const m = d.getMinutes();
     const ampm = h >= 12 ? "pm" : "am";
     const h12 = h % 12 || 12;
-    return m === 0 ? `${h12}${ampm}` : `${h12}:${String(m).padStart(2, "0")}${ampm}`;
+    return `${h12}${ampm}`;
+  }
+
+  function fmtDayTime(ts: number) {
+    const d = new Date(ts);
+    const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const h = d.getHours();
+    if (h === 0) return days[d.getDay()];
+    const ampm = h >= 12 ? "pm" : "am";
+    const h12 = h % 12 || 12;
+    return `${h12}${ampm}`;
+  }
+
+  function fmtLabel(ts: number) {
+    return resolution === "1h" ? fmtDayTime(ts) : fmtTime(ts);
   }
 
   function fmtRange(ts: number) {
-    return `${fmtBucketTime(ts)} – ${fmtBucketTime(ts + 15 * 60_000)}`;
+    if (resolution === "1h") {
+      const d = new Date(ts);
+      const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+      const h = d.getHours();
+      const ampm = h >= 12 ? "pm" : "am";
+      const h12 = h % 12 || 12;
+      const nextH = (h + 1) % 24;
+      const nextAmpm = nextH >= 12 ? "pm" : "am";
+      const nextH12 = nextH % 12 || 12;
+      return `${days[d.getDay()]} ${h12}${ampm}–${nextH12}${nextAmpm}`;
+    }
+    const end = ts + 15 * 60_000;
+    return `${fmtTime(ts)} – ${fmtTime(end)}`;
   }
 
   const hoveredBucket = hoveredIdx !== null ? buckets[hoveredIdx] : null;
@@ -96,7 +128,7 @@ export function LaunchRateChart({ buckets }: { buckets: RateBucket[] }) {
               className="absolute text-[10px] text-zinc-500 -translate-x-1/2 whitespace-nowrap"
               style={{ left: `${((i + 0.5) / buckets.length) * 100}%`, top: 4 }}
             >
-              {fmtBucketTime(b.ts)}
+              {fmtLabel(b.ts)}
             </span>
           );
         })}
