@@ -50,6 +50,9 @@ export default async function TokenPage({
   const pool =
     pair?.pairAddress ?? (await fetchTopPoolForToken(launch.tokenAddress));
   const img = ipfsToHttp(launch.imageUri);
+  const fee = launch.feeRecipient;
+  const feeSameAsDeployer =
+    !!fee && fee.walletAddress.toLowerCase() === launch.deployer.walletAddress.toLowerCase();
   const change = pair?.priceChange?.h24;
   const changeClass =
     change === undefined
@@ -212,7 +215,6 @@ export default async function TokenPage({
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-        <KV label="Token address" value={launch.tokenAddress} mono copyValue={launch.tokenAddress} />
         <KV
           label="Deployer"
           value={
@@ -229,6 +231,26 @@ export default async function TokenPage({
           }
           extraHref={`/deployer/${launch.deployer.walletAddress}`}
         />
+        <KV
+          label="Fee recipient"
+          value={
+            fee
+              ? fee.xUsername
+                ? `@${fee.xUsername} (${shortAddr(fee.walletAddress)})`
+                : fee.walletAddress
+              : "Not specified"
+          }
+          mono={!!fee && !fee.xUsername}
+          href={
+            fee
+              ? fee.xUsername
+                ? `https://x.com/${fee.xUsername}`
+                : `https://basescan.org/address/${fee.walletAddress}`
+              : undefined
+          }
+          extra={feeSameAsDeployer ? "same as deployer" : undefined}
+        />
+        <KV label="Token address" value={launch.tokenAddress} mono copyValue={launch.tokenAddress} />
         <KV label="Launch type" value={launch.launchType} />
         <KV label="Chain" value={launch.chain} />
       </div>
