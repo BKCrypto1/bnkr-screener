@@ -30,18 +30,14 @@ export function LaunchRateChart({
     return `${h12}${ampm}`;
   }
 
-  function fmtDayTime(ts: number) {
+  function fmtDayLabel(ts: number) {
     const d = new Date(ts);
     const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    const h = d.getHours();
-    if (h === 0) return days[d.getDay()];
-    const ampm = h >= 12 ? "pm" : "am";
-    const h12 = h % 12 || 12;
-    return `${h12}${ampm}`;
+    return `${days[d.getDay()]} ${d.getMonth() + 1}/${d.getDate()}`;
   }
 
   function fmtLabel(ts: number) {
-    return resolution === "1h" ? fmtDayTime(ts) : fmtTime(ts);
+    return resolution === "1h" ? fmtDayLabel(ts) : fmtTime(ts);
   }
 
   function fmtRange(ts: number) {
