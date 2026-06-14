@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redis, K } from "@/lib/redis";
 import { StatsView } from "@/components/stats-view";
 import type { RateBucket } from "@/components/launch-rate-chart";
+import type { PaidEntry } from "@/lib/paid-watcher";
 
 export const revalidate = 60;
 
@@ -28,6 +29,15 @@ export default async function StatsPage() {
     buckets.push({ ts, count, isCurrent: ts === currentBucket });
   }
 
+  // Paid/promoted launches — proxy for "launches that got real traction".
+  // PaidEntry.firstPaidAt is when a token was first seen paying for a
+  // DexScreener boost/profile; entries are retained 14d so 7d is covered.
+  const paidRaw =
+    (await redis.hgetall<Record<string, PaidEntry>>(K.paid).catch(() => null)) ?? {};
+  const paidTimestamps = Object.values(paidRaw)
+    .map((e) => e?.firstPaidAt)
+    .filter((t): t is number => typeof t === "number");
+
   return (
     <div className="mx-auto max-w-4xl px-4 py-6 flex flex-col gap-6">
       <div className="flex items-center justify-between">
@@ -38,7 +48,7 @@ export default async function StatsPage() {
         <p className="text-xs text-zinc-500">15-min buckets · up to 7d · updates every minute</p>
       </div>
 
-      <StatsView allBuckets={buckets} />
+      <StatsView allBuckets={buckets} paidTimestamps={paidTimestamps} />
     </div>
   );
 }

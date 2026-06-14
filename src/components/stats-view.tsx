@@ -5,7 +5,13 @@ import { LaunchRateChart, type RateBucket } from "@/components/launch-rate-chart
 
 type Range = "1h" | "24h" | "7d";
 
-export function StatsView({ allBuckets }: { allBuckets: RateBucket[] }) {
+export function StatsView({
+  allBuckets,
+  paidTimestamps = [],
+}: {
+  allBuckets: RateBucket[];
+  paidTimestamps?: number[];
+}) {
   const [range, setRange] = useState<Range>("24h");
 
   const { buckets, resolution, totalLabel, peakLabel } = useMemo(() => {
@@ -62,11 +68,11 @@ export function StatsView({ allBuckets }: { allBuckets: RateBucket[] }) {
   const peak = Math.max(...buckets.map((b) => b.count), 0);
   const currentWindow = buckets[buckets.length - 1]?.count ?? 0;
 
-  // Compare current period vs previous same-length period
-  const half = Math.floor(buckets.length / 2);
-  const recent = buckets.slice(-half).reduce((s, b) => s + b.count, 0);
-  const prior = buckets.slice(-half * 2, -half).reduce((s, b) => s + b.count, 0);
-  const trendLabel = prior > 0 ? `${recent > prior ? "↑" : "↓"} vs prev` : undefined;
+  // Promoted = launches that paid for a DexScreener boost/profile within the
+  // active window — a free proxy for "launches that got real traction".
+  const windowStart = buckets[0]?.ts ?? 0;
+  const promoted = paidTimestamps.filter((t) => t >= windowStart).length;
+  const promotedPct = total > 0 ? Math.min(100, Math.round((promoted / total) * 100)) : 0;
 
   const currentLabel = range === "1h" ? "Last 15 min" : range === "24h" ? "Last 15 min" : "Last 1h";
   const totalPeriodLabel = range === "1h" ? "Total 1h" : range === "24h" ? "Total 24h" : "Total 7d";
@@ -81,9 +87,14 @@ export function StatsView({ allBuckets }: { allBuckets: RateBucket[] }) {
             sub="in progress"
             highlight={total > 0 && currentWindow > (total / buckets.length) * 1.5}
           />
-          <StatCard label="Recent half" value={String(recent)} sub={trendLabel} />
           <StatCard label={peakLabel} value={String(peak)} sub={`in ${range}`} />
           <StatCard label={totalPeriodLabel} value={String(total)} sub="launches tracked" />
+          <StatCard
+            label="Promoted"
+            value={String(promoted)}
+            sub={total > 0 ? `${promotedPct}% paid for DEX` : "paid for DEX"}
+            highlight={promoted > 0}
+          />
         </div>
       </div>
 
