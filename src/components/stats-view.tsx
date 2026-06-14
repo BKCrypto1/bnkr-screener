@@ -72,7 +72,15 @@ export function StatsView({
   // active window — a free proxy for "launches that got real traction".
   const windowStart = buckets[0]?.ts ?? 0;
   const promoted = paidTimestamps.filter((t) => t >= windowStart).length;
-  const promotedPct = total > 0 ? Math.min(100, Math.round((promoted / total) * 100)) : 0;
+  const rawPct = total > 0 ? Math.min(100, (promoted / total) * 100) : 0;
+  // Promoted is a tiny fraction of total launches — avoid rounding a real
+  // count down to a misleading "0%".
+  const promotedPctLabel =
+    promoted === 0
+      ? "none paid for DEX"
+      : rawPct < 1
+      ? "<1% of launches"
+      : `${Math.round(rawPct)}% of launches`;
 
   const currentLabel = range === "1h" ? "Last 15 min" : range === "24h" ? "Last 15 min" : "Last 1h";
   const totalPeriodLabel = range === "1h" ? "Total 1h" : range === "24h" ? "Total 24h" : "Total 7d";
@@ -92,7 +100,7 @@ export function StatsView({
           <StatCard
             label="Promoted"
             value={String(promoted)}
-            sub={total > 0 ? `${promotedPct}% paid for DEX` : "paid for DEX"}
+            sub={promotedPctLabel}
             highlight={promoted > 0}
           />
         </div>
