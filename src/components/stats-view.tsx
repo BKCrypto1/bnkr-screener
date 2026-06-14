@@ -73,14 +73,10 @@ export function StatsView({
   const windowStart = buckets[0]?.ts ?? 0;
   const promoted = paidTimestamps.filter((t) => t >= windowStart).length;
   const rawPct = total > 0 ? Math.min(100, (promoted / total) * 100) : 0;
-  // Promoted is a tiny fraction of total launches — avoid rounding a real
-  // count down to a misleading "0%".
+  // Promoted is a tiny fraction of total launches — show two decimals so a
+  // real count doesn't round down to a misleading "0%".
   const promotedPctLabel =
-    promoted === 0
-      ? "none paid for DEX"
-      : rawPct < 1
-      ? "<1% of launches"
-      : `${Math.round(rawPct)}% of launches`;
+    promoted === 0 ? "none paid for DEX" : `${rawPct.toFixed(2)}% of launches`;
 
   const currentLabel = range === "1h" ? "Last 15 min" : range === "24h" ? "Last 15 min" : "Last 1h";
   const totalPeriodLabel = range === "1h" ? "Total 1h" : range === "24h" ? "Total 24h" : "Total 7d";
